@@ -1,0 +1,3 @@
+[submodule "chatlaw-flutter-client"]
+	path = chatlaw-flutter-client
+	url = https://gitee.com/kamenridersaber/chat-law-flutter-client
