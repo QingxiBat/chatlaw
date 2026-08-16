@@ -1,6 +1,5 @@
 import os
 from typing import List
-import openi
 from launcher import get_resources_path
 
 llm_list = ["config.json",
@@ -41,6 +40,44 @@ vectorstore_list = ["law_article_index.json",
                     os.path.join("embedding_model", "vocab.txt")]
 
 
+def _openi():
+    openi_home = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".openi_home"))
+    os.makedirs(openi_home, exist_ok=True)
+    os.environ["HOME"] = openi_home
+    os.environ["USERPROFILE"] = openi_home
+
+    try:
+        import openi
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            f"{exc}. Resource download requires openi. Install project "
+            "dependencies with `python -m pip install -r requirements.txt`."
+        ) from exc
+    try:
+        from openi.refactor.service.notification import set_global_notice
+        set_global_notice(True)
+    except Exception:
+        pass
+    return openi
+
+
+def _download_file(repo_id, repo_type, local_dir, resource_type):
+    openi = _openi()
+    try:
+        openi.openi_download_file(
+            repo_id,
+            repo_type=repo_type,
+            local_dir=local_dir,
+            max_workers=10
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to download {resource_type} from OpenI repo {repo_id!r}. "
+            "Check network access to https://openi.pcl.ac.cn, retry later, "
+            "or manually place the required files under chatlaw/resources."
+        ) from exc
+
+
 def download_resources(resource_type):
     """
         根据缺少的文件通过启智社区下载补齐。
@@ -56,26 +93,33 @@ def download_resources(resource_type):
     if resource_type not in ("tokenizer", "llm", "audio_model", "vectorstore"):
         raise ValueError("Arg 'resource_type' must be in (tokenizer, llm, audio_model)", "vectorstore")
     if resource_type == "tokenizer" and check_files_complete("tokenizer", tokenizer_list) is False:
-        openi.openi_download_file("enter/QwenTokenizer",
-                                  repo_type="dataset" ,
-                                  local_dir=get_resources_path(),
-                                  max_workers=10)
+        _download_file(
+            "enter/QwenTokenizer",
+            repo_type="dataset",
+            local_dir=get_resources_path(),
+            resource_type="tokenizer",
+        )
     elif resource_type == "llm" and check_files_complete("llm", llm_list) is False:
-        openi.openi_download_file("enter/QwenModel",
-                                  repo_type="model",
-                                  local_dir=os.path.join(get_resources_path(), "llm"),
-                                  max_workers=10)
+        _download_file(
+            "enter/QwenModel",
+            repo_type="model",
+            local_dir=os.path.join(get_resources_path(), "llm"),
+            resource_type="llm",
+        )
     elif resource_type == "audio_model" and check_files_complete("audio_model", audio_model_list) is False:
-        openi.openi_download_file("enter/Paraformer",
-                                  repo_type="dataset",
-                                  local_dir=os.path.join(get_resources_path(), "audio_model"),
-                                  max_workers=10)
+        _download_file(
+            "enter/Paraformer",
+            repo_type="dataset",
+            local_dir=os.path.join(get_resources_path(), "audio_model"),
+            resource_type="audio_model",
+        )
     elif resource_type == "vectorstore" and check_files_complete("vectorstore", vectorstore_list) is False:
-        openi.openi_download_file(
+        _download_file(
             "enter/vectorstore",
             repo_type="dataset",
             local_dir=os.path.join(get_resources_path(), "vectorstore"),
-            max_workers=10)
+            resource_type="vectorstore",
+        )
     else:
         pass
 
