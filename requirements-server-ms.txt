@@ -1,6 +1,0 @@
-# MindSpore/MindNLP server route dependencies.
-#
-# Use this on Linux/Ascend or another supported MindSpore platform,
-# preferably in the project-recommended Python 3.11 environment.
-
-mindnlp>=0.5.1
