@@ -4,9 +4,11 @@ import threading
 import binascii
 import gradio as gr
 import markdown
-from transformers import AutoTokenizer
 from funasr_onnx import Paraformer
 
+from chatlaw.client.build import build_prompt_pipeline
+from chatlaw.client.rag import docs_to_html, run_rag
+from chatlaw.client.tokenizer import tokenize_prompt
 from chatlaw.configuration import config
 from chatlaw.client.utils.utils_ms import (
     heartbeat_client_ms,
@@ -17,11 +19,6 @@ from chatlaw.client.utils.common_utils import (
     render_mathml_from_latex,
     connection_acknowledgement,
     speech_to_text,
-    load_vectorstore,
-    load_exact_index,
-    build_law_name_candidates,
-    retrieve_laws,
-    build_prompt
 )
 from chatlaw.dataloader import download_resources
 from launcher import get_resources_path
@@ -39,10 +36,6 @@ def alive_flag():
 # ========== 资源加载 ==========
 resource_path = get_resources_path()
 
-download_resources(resource_type="tokenizer")
-tokenizer_path = os.path.join(resource_path, "tokenizer").replace("\\", "/")
-tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
-
 download_resources(resource_type="audio_model")
 AUDIO_MODEL_DIR = os.path.join(resource_path, "audio_model").replace("\\", "/")
 TARGET_SR = 16000
@@ -55,69 +48,6 @@ audio_model = Paraformer(
     quantize=True,
     device_id=-1
 )
-
-download_resources(resource_type="vectorstore")
-vectorstore = load_vectorstore(os.path.join(get_resources_path(), "vectorstore", "law_faiss"))
-exact_index = load_exact_index()
-law_name_candidates = build_law_name_candidates(exact_index)
-
-
-def _extract_doc_fields(item):
-    """
-    统一提取检索结果字段，兼容两种输入：
-    1. FAISS 返回的 LangChain Document
-    2. 精确索引返回的 dict
-    """
-    # FAISS Document
-    if hasattr(item, "metadata"):
-        metadata = item.metadata or {}
-        law_name = (
-            metadata.get("law_name_raw")
-            or metadata.get("law_name")
-            or metadata.get("law_name_norm")
-            or "未知法律"
-        )
-        article = metadata.get("article", "")
-        content = metadata.get("content", "") or getattr(item, "page_content", "")
-        return law_name, article, content
-
-    # exact 索引 dict
-    if isinstance(item, dict):
-        law_name = (
-            item.get("law_name_raw")
-            or item.get("law_name")
-            or item.get("law_name_norm")
-            or "未知法律"
-        )
-        article = item.get("article", "")
-        content = item.get("content", "")
-        return law_name, article, content
-
-    # fallback
-    return "未知法律", "", str(item)
-
-
-def format_retrieved_docs_html(docs):
-    """
-    将当前检索到的知识库条文整理成 HTML。
-    兼容：
-    - FAISS Document
-    - exact index dict
-    """
-    if not docs:
-        return "<div>未检索到相关法律条文。</div>"
-
-    blocks = []
-    for i, doc in enumerate(docs, 1):
-        law_name, article, content = _extract_doc_fields(doc)
-        blocks.append(
-            f"### {i}. 《{law_name}》{article}\n\n{content}"
-        )
-
-    md_text = "\n\n---\n\n".join(blocks)
-    rendered = markdown.markdown(md_text, extensions=["fenced_code", "tables"])
-    html = render_mathml_from_latex(rendered)
-    return f"<div>{html}</div>"
 
 
 def prepare_request_fn(input_audio, input_text):
@@ -175,16 +105,12 @@ def prepare_request_fn(input_audio, input_text):
             target_sr=TARGET_SR
         )
 
-    # ===== 知识库检索 =====
-    docs = retrieve_laws(
-        vectorstore=vectorstore,
-        query=input_text,
-        exact_index=exact_index,
-        law_name_candidates=law_name_candidates
-    )
+    # ===== 知识库检索 + prompt 构建 =====
+    rag_result = run_rag(input_text)
+    prompt_result = build_prompt_pipeline(input_text, rag_result=rag_result)
 
-    retrieval_html = format_retrieved_docs_html(docs)
-    final_prompt = build_prompt(input_text, docs)
+    retrieval_html = docs_to_html(rag_result.docs)
+    final_prompt = prompt_result.prompt
 
     # 检索完成后，按钮开放，但面板默认仍隐藏
     return (
@@ -237,11 +163,7 @@ def stream_inference_fn(final_prompt):
         yield "🟡 正在建立连接...", ""
 
         # ---- 构造模型输入（np tensor） ----
-        messages = [{"role": "user", "content": final_prompt}]
-        templated = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        model_inputs = tokenizer([templated], return_tensors="np")
+        model_inputs = tokenize_prompt(final_prompt, return_tensors="np").model_inputs
 
         # ---- 连接确认（短连接） ----
         detail, status = connection_acknowledgement(

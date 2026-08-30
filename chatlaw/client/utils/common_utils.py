@@ -304,8 +304,20 @@ def load_vectorstore(path):
         encode_kwargs={"normalize_embeddings": True},
     )
 
+    faiss_path = path
+    if os.name == "nt":
+        try:
+            os.fspath(path).encode("ascii")
+        except UnicodeEncodeError:
+            # faiss.read_index can fail on Windows when given a non-ASCII
+            # absolute path. A relative ASCII path works when the project root
+            # is the current working directory.
+            rel_path = os.path.relpath(path, os.getcwd())
+            if not rel_path.startswith("..") and os.path.isdir(rel_path):
+                faiss_path = rel_path
+
     vectorstore = FAISS.load_local(
-        path,
+        faiss_path,
         embeddings,
         allow_dangerous_deserialization=True
     )
