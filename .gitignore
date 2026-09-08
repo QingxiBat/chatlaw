@@ -4,6 +4,7 @@ video_model/
 resources/
 .idea/
 __pycache__/
+.openi_home/
 openi_resource.version
 chatlaw.egg-info/
 build/

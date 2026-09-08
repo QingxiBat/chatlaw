@@ -1,5 +1,4 @@
 accelerate
-mindnlp>=0.5.1
 transformers
 jieba
 torch>=2.9.0
@@ -18,8 +17,12 @@ faiss-cpu
 sentence-transformers
 pyside6
 
-# develop
+# MindSpore / MindNLP is only needed by the server ms route.
+# It is unavailable for Windows/Python 3.13 in common package indexes.
+mindnlp>=0.5.1; platform_system == "Linux" and python_version < "3.13"
+
+# develop / optional tooling
 matplotlib
 pymupdf
-bitsandbytes       # 4bit 量化支持（Windows 需要特殊安装）
+bitsandbytes; platform_system != "Windows" and python_version < "3.13"
 tqdm
