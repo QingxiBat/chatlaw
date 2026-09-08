@@ -1,31 +1,25 @@
 import os
 import re
 import json
-import socket
 import time
 import uuid
-import numpy as np
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-import soundfile as sf
-import librosa
-from latex2mathml.converter import convert as latex_to_mathml
 from launcher import get_resources_path
+from chatlaw.network.http_transport import close_quietly, post_json, read_exact
 
 
 def recv_exact(conn, n, timeout=None):
     """
     功能：
-        从指定连接中精确读取 `n` 字节的数据。若未能在读取过程中获取足够字节数，
-        或对端提前关闭连接，则抛出异常。该函数保证返回的数据长度严格等于 `n`。
+        从 socket 或 HTTP 响应对象中精确读取 `n` 字节的数据。
+        若未能在读取过程中获取足够字节数，或对端提前关闭连接，则抛出异常。
 
     Args:
-        conn: 网络连接对象，需提供 `recv()` 方法用于接收字节数据。
+        conn: 网络连接对象，需提供 `recv()` 或 `read()` 方法用于接收字节数据。
         n (int): 期望接收的字节数。
         timeout (float, None): 接收数据的超时时间（秒）。若为 ``None`` 则不设置超时。默认： ``None`` 。
 
     Inputs:
-        - **conn**: 提供 `recv` 方法的连接实例，通常为 socket 连接。
+        - **conn**: 提供 `recv` 或 `read` 方法的连接实例。
         - **n** (int): 需要从连接中完整读取的字节数。
         - **timeout** (float, None): 当设置超时时间时，若超时未接收到数据，将由底层抛出超时异常。
 
@@ -35,15 +29,7 @@ def recv_exact(conn, n, timeout=None):
     Raises:
         ConnectionError: 当对端在未传输足够数据的情况下关闭连接时抛出该异常。
     """
-    if timeout is not None:
-        conn.settimeout(timeout)
-    buf = b""
-    while len(buf) < n:
-        chunk = conn.recv(n - len(buf))
-        if not chunk:
-            raise ConnectionError("peer closed while receiving")
-        buf += chunk
-    return buf
+    return read_exact(conn, n, timeout=timeout)
 
 
 def render_mathml_from_latex(md_text: str) -> str:
@@ -74,16 +60,21 @@ def render_mathml_from_latex(md_text: str) -> str:
     Raises:
         本函数不向外抛出异常。任何转换错误都会在内部捕获并采用回退方案。
     """
+    try:
+        from latex2mathml.converter import convert as latex_to_mathml
+    except Exception:
+        return md_text
+
     def repl_inline(m):
         try:
             return latex_to_mathml(m.group(1))
-        except:
+        except Exception:
             return f"<code>{m.group(1)}</code>"
 
     def repl_block(m):
         try:
             return f"<div>{latex_to_mathml(m.group(1))}</div>"
-        except:
+        except Exception:
             return f"<pre>{m.group(1)}</pre>"
 
     text = re.sub(r"\$\$(.+?)\$\$", repl_block, md_text, flags=re.S)
@@ -91,66 +82,54 @@ def render_mathml_from_latex(md_text: str) -> str:
     return text
 
 
-def connection_acknowledgement(server_ip, data_port,
-                                  handshake_req, handshake_resp,
-                                  recv_exact_fn, start_time):
+def connection_acknowledgement(server_ip, data_port, health_path, start_time):
     """
     功能：
-        建立一次短连接，用于快速检测服务器的数据端口是否正常工作。
-        函数会向服务器发送握手请求字节，并验证服务器返回的响应是否正确。
-        若握手成功，则说明服务器运行正常；否则视为连接失败。
-        该检测通常用于在正式推理前确认服务器在线状态。
+        发送一次 HTTP POST 健康检查，请求数据端口是否正常工作。
+        若返回 200，则说明服务器运行正常；否则视为连接失败。
 
     Args:
         server_ip (str): 服务器的 IP 地址。
         data_port (int): 数据服务监听端口。
-        handshake_req (bytes): 客户端发送给服务器的握手请求字节。
-        handshake_resp (bytes): 客户端期望从服务器收到的握手响应字节。
-        recv_exact_fn (callable): 准确读取指定字节数的函数，用于接收握手响应。
+        health_path (str): 健康检查路径，例如 ``/health``。
         start_time (float): 调用开始时间戳，用于计算连接耗时。
 
     Inputs:
         - **server_ip**: 服务器主机地址。
         - **data_port**: 用于测试连接的数据端口。
-        - **handshake_req**: 握手机制中发送的标记字节。
-        - **handshake_resp**: 握手机制中预期收到的字节。
-        - **recv_exact_fn**: 必须具有签名 `fn(conn, n, timeout=None)`。
+        - **health_path**: 用于确认数据端口可用的 HTTP 路径。
         - **start_time**: 用于计算连接耗时（秒）。
 
     Outputs:
-        tuple(str, bool):
-            - 第一个元素为状态信息字符串（成功或失败信息）；
-            - 第二个元素为布尔值：
-                - True：连接验证成功；
-                - False：连接失败。
+        tuple(str, bool): 状态信息字符串与布尔值。
 
     Raises:
         函数内部捕获所有异常，不会向外抛出。
-        若连接或握手过程中出现错误，会返回 (错误信息, False)。
+        若健康检查过程中出现错误，会返回 (错误信息, False)。
     """
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(3.0)
-        s.connect((server_ip, data_port))
-        s.settimeout(1.0)
-
-        s.sendall(handshake_req)
-        resp = recv_exact_fn(s, 1, timeout=2.0)
-
-        if resp != handshake_resp:
-            raise ConnectionError("Handshake failed")
+        conn, resp = post_json(
+            server_ip,
+            data_port,
+            health_path,
+            {"probe": "health"},
+            timeout=3.0,
+        )
+        try:
+            if resp.status != 200:
+                body = resp.read().decode("utf-8", "ignore")
+                raise ConnectionError(
+                    body or f"health check failed with HTTP {resp.status}"
+                )
+            resp.read()
+        finally:
+            close_quietly(resp, conn)
 
         cost = time.time() - start_time
         return f"✅ 建立连接成功，用时 {cost:.2f}s", True
 
     except Exception as e:
         return f"⚠️ 通信失败：{e}", False
-
-    finally:
-        try:
-            s.close()
-        except:
-            pass
 
 
 def speech_to_text(audio, target_sr, audio_cache_dir, audio_model):
@@ -160,6 +139,16 @@ def speech_to_text(audio, target_sr, audio_cache_dir, audio_model):
     """
     if audio is None:
         return "未检测到语音输入"
+
+    if audio_model is None:
+        return "语音模型不可用，请改用文本输入"
+
+    try:
+        import numpy as np
+        import soundfile as sf
+        import librosa
+    except Exception as exc:
+        return f"语音依赖不可用，已切换到文本输入：{exc}"
 
     sr, data = audio
 
@@ -295,21 +284,36 @@ def parse_law_article_query(query: str, law_name_candidates=None):
 
 
 def load_vectorstore(path):
-    embeddings = HuggingFaceEmbeddings(
-        model_name=os.path.join(
-            get_resources_path(),
-            "vectorstore",
-            "embedding_model"
-        ),
-        encode_kwargs={"normalize_embeddings": True},
-    )
+    class _FallbackVectorStore:
+        def similarity_search(self, query, k=5):
+            return []
 
-    vectorstore = FAISS.load_local(
-        path,
-        embeddings,
-        allow_dangerous_deserialization=True
-    )
-    return vectorstore
+    try:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        from langchain_community.vectorstores import FAISS
+    except Exception as exc:
+        print(f"[WARN] 向量库依赖不可用，降级为空检索：{exc}")
+        return _FallbackVectorStore()
+
+    try:
+        embeddings = HuggingFaceEmbeddings(
+            model_name=os.path.join(
+                get_resources_path(),
+                "vectorstore",
+                "embedding_model"
+            ),
+            encode_kwargs={"normalize_embeddings": True},
+        )
+
+        vectorstore = FAISS.load_local(
+            path,
+            embeddings,
+            allow_dangerous_deserialization=True
+        )
+        return vectorstore
+    except Exception as exc:
+        print(f"[WARN] 向量库加载失败，降级为空检索：{exc}")
+        return _FallbackVectorStore()
 
 
 def load_exact_index(index_path=None):
@@ -326,7 +330,8 @@ def load_exact_index(index_path=None):
         )
 
     if not os.path.exists(index_path):
-        raise FileNotFoundError(f"精确索引不存在: {index_path}")
+        print(f"[WARN] 精确索引不存在，返回空索引: {index_path}")
+        return {}
 
     with open(index_path, "r", encoding="utf-8") as f:
         exact_index = json.load(f)

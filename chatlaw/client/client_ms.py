@@ -1,11 +1,14 @@
 import os
 import time
 import threading
-import binascii
 import gradio as gr
 import markdown
 from transformers import AutoTokenizer
-from funasr_onnx import Paraformer
+
+try:
+    from funasr_onnx import Paraformer
+except Exception:
+    Paraformer = None
 
 from chatlaw.configuration import config
 from chatlaw.client.utils.utils_ms import (
@@ -43,20 +46,23 @@ download_resources(resource_type="tokenizer")
 tokenizer_path = os.path.join(resource_path, "tokenizer").replace("\\", "/")
 tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
 
-download_resources(resource_type="audio_model")
-AUDIO_MODEL_DIR = os.path.join(resource_path, "audio_model").replace("\\", "/")
 TARGET_SR = 16000
 AUDIO_CACHE_DIR = os.path.join(get_resources_path(), "_asr_cache")
 os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
 
-audio_model = Paraformer(
-    AUDIO_MODEL_DIR,
-    batch_size=1,
-    quantize=True,
-    device_id=-1
-)
+if Paraformer is None:
+    audio_model = None
+    print("[WARN] funasr_onnx unavailable, speech input disabled.")
+else:
+    download_resources(resource_type="audio_model")
+    AUDIO_MODEL_DIR = os.path.join(resource_path, "audio_model").replace("\\", "/")
+    audio_model = Paraformer(
+        AUDIO_MODEL_DIR,
+        batch_size=1,
+        quantize=True,
+        device_id=-1
+    )
 
-download_resources(resource_type="vectorstore")
 vectorstore = load_vectorstore(os.path.join(get_resources_path(), "vectorstore", "law_faiss"))
 exact_index = load_exact_index()
 law_name_candidates = build_law_name_candidates(exact_index)
@@ -228,6 +234,7 @@ def stream_inference_fn(final_prompt):
             alive_flag,
             stop_event,
             recv_exact,
+            config.HEARTBEAT_PATH,
         ),
         daemon=True
     ).start()
@@ -247,10 +254,8 @@ def stream_inference_fn(final_prompt):
         detail, status = connection_acknowledgement(
             config.SERVER_IP,
             config.DATA_PORT,
-            binascii.unhexlify(config.DATA_HANDSHAKE_REQ),
-            binascii.unhexlify(config.DATA_HANDSHAKE_RESP),
-            recv_exact,
-            start_time
+            config.HEALTH_PATH,
+            start_time,
         )
         yield detail, ""
 
@@ -266,11 +271,10 @@ def stream_inference_fn(final_prompt):
         for chunk in stream_from_server_ms(
             config.SERVER_IP,
             config.DATA_PORT,
-            binascii.unhexlify(config.DATA_HANDSHAKE_REQ),
-            binascii.unhexlify(config.DATA_HANDSHAKE_RESP),
             recv_exact,
             stop_event,
-            model_inputs
+            model_inputs,
+            config.INFER_PATH,
         ):
             if stop_event.is_set():
                 rendered = markdown.markdown(

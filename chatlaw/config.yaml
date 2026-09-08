@@ -8,7 +8,9 @@ DATA_PORT: 6006
 HB_INTERVAL: 1.0
 # 心跳超时判定阈值
 HB_TIMEOUT: 3.0
-# 客户端一字节确认
-DATA_HANDSHAKE_REQ: 'A5'
-# 服务器回发
-DATA_HANDSHAKE_RESP: '5A'
+# 数据端点健康检查路径
+HEALTH_PATH: "/health"
+# 心跳端点路径
+HEARTBEAT_PATH: "/heartbeat"
+# 推理端点路径
+INFER_PATH: "/infer"
