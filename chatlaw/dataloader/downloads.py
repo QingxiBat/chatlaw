@@ -102,7 +102,7 @@ def download_resources(resource_type):
     elif resource_type == "llm" and check_files_complete("llm", llm_list) is False:
         _download_file(
             "enter/QwenModel",
-            repo_type="model",
+            repo_type="dataset",
             local_dir=os.path.join(get_resources_path(), "llm"),
             resource_type="llm",
         )
