@@ -20,6 +20,7 @@ from chatlaw.network.http_transport import (
     send_json_response,
     send_pickled_frame,
 )
+from chatlaw.network.tensor_utils import to_device_tensors
 from launcher import get_resources_path
 
 
@@ -177,8 +178,8 @@ class HeartbeatHandler(BaseHandler):
 
 
 def stream_generate(model_inputs):
-    input_ids = model_inputs["input_ids"].to(model.device)
-    attention_mask = model_inputs["attention_mask"].to(model.device)
+    # 客户端（含 Android 端）可能发送 numpy 数组而非 torch 张量，统一在此转换。
+    input_ids, attention_mask = to_device_tensors(model_inputs, model.device)
 
     streamer = TextIteratorStreamer(
         tokenizer,
