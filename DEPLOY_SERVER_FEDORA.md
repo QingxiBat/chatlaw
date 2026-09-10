@@ -243,4 +243,106 @@ curl -s -X POST http://127.0.0.1:6005/heartbeat -H 'Content-Type: application/js
 
 ---
 
+## 12. 可选：切换到 LoRA 微调后的模型
+
+默认部署跑的是 OpenI 上的**官方** Qwen3-4B-Instruct-2507（`config.json` 里 `model_type: qwen3`）。若要用本项目 LoRA 微调出来的模型，需要先合并再替换 `chatlaw/resources/llm`。
+
+### 12.1 为什么不能直接把 adapter 目录丢过去
+
+`develop/finetune/train_qwen3_finetune.py` 保存的产物是 **PEFT adapter**（`adapter_config.json` + `adapter_model.safetensors`，默认在 `chatlaw/resources/llm/lora_adapter`），不是完整模型；而服务端只做 `AutoModelForCausalLM.from_pretrained(resources/llm)`，不认 adapter。中间必须做一次 `merge_and_unload`，这就是 `develop/finetune/merge_lora.py` 的作用。
+
+### 12.2 合并导出
+
+合并需要 `peft`（已在 `requirements.txt` 的 develop 段），并需要能加载 4B 模型的机器（CPU 也可以，只是慢）：
+
+```bash
+cd ~/ChatLaw
+python develop/finetune/merge_lora.py
+# 产物：develop/finetune/qwen3_4b_merged（约 8GB，bf16，3 个分片）
+```
+
+脚本会做这些事：
+- 校验 base 与 adapter（同族、`target_modules` 都能在基座里找到），不一致会提前报错；
+- 合并后按 `max_shard_size="4GB"` 保存，**复现官方 `model-0000x-of-00003` 的命名**，避免被当成"资源不完整"；
+- 在产物目录写 `.chatlaw_local_model` 标记文件 —— `downloads.py` 见到它就**不会**再用 OpenI 官方权重覆盖；
+- 在 GPU 机器上还会用同一 prompt 分别跑基座与合并模型，打印两段输出供肉眼确认 adapter 生效。
+
+确认无误后替换（或在服务端直接执行）：
+
+```bash
+# 方式一：本机合并，手动搬运到服务器
+rsync -av --progress develop/finetune/qwen3_4b_merged/ 服务器:~/ChatLaw/chatlaw/resources/llm/
+# 注意要带上 .chatlaw_local_model（rsync/cp -a 会带上；用通配符 * 会漏掉隐藏文件）
+
+# 方式二：直接在本机服务端仓库里原地替换
+python develop/finetune/merge_lora.py --in-place            # 替换 resources/llm
+python develop/finetune/merge_lora.py --in-place --backup   # 替换前把原权重挪到 llm_base_backup/
+```
+
+> `.gitignore` 忽略了 `llm/` 与 `resources/`，权重不会进 git，必须单独搬运（约 8GB）。
+
+### 12.3 验证确实加载了微调模型
+
+启动服务端时日志会明确区分权重来源（`server_pt.py` / `server_ms.py` 都会打印）：
+
+```
+[Model] 权重来源：本地自定义权重（合并时间 2026-09-10 15:02:11，r=8，adapter=/home/x/ChatLaw/chatlaw/resources/llm/lora_adapter）
+[Model] model_type=qwen3 architectures=['Qwen3ForCausalLM'] dtype=torch.bfloat16
+```
+
+看到「权重来源：OpenI 官方 enter/QwenModel」说明仍在跑官方模型。也可直接看 `chatlaw/resources/llm/.chatlaw_local_model` 是否存在。
+
+### 12.4 回退到官方模型
+
+```bash
+rm -f chatlaw/resources/llm/.chatlaw_local_model          # 先去掉标记
+rm -f chatlaw/resources/llm/model*.safetensors chatlaw/resources/llm/model.safetensors.index.json
+# 重启服务端 → 检测到 llm 资源不全且无标记，自动从 OpenI 重新下载官方权重
+```
+
+### 12.5 注意点
+
+- **prompt 模板只有一份真相源**：客户端推理模板在 `chatlaw/client/utils/common_utils.py` 的 `build_prompt`（Flutter 端 `chatlaw-flutter-client/python/build.py` 是同一份文案，改动需同步），训练脚本 `train_qwen3_finetune.py` 的 `build_user_content` **直接复用**它，所以训练与推理的系统设定、约束文案、【法律条文】结构天然一致。**前提是拿这个新脚本重新训练过**：改动客户端模板后必须重新微调，旧 adapter 学的是旧模板。
+- **法条块渲染**：训练样本的 `reference` 元素如果是结构化对象（`law_name`/`article`/`content`），渲染结果与线上检索出来的完全一致；如果是纯字符串，则渲染成 `N. 原文`。想让两者严格一致，就把 `dataset.json` 的 `reference` 写成结构化对象，或采样一份原文确认格式。
+- **tokenizer 没有变**：微调不改 tokenizer，客户端与协议无需改动；但如果你在微调里替换过 tokenizer 或改了 `chat_template`，必须同步更新客户端与打进 APK 的 `resources/tokenizer`。
+- 服务端生成参数仍是硬编码的 `max_new_tokens=4096 / temperature=0.7`，不随模型变化。
+- `develop/RAG/law_pdf_to_json.py` 也读 `chatlaw/resources/llm`，原地替换后这个离线抽取脚本会跟着用微调模型；若希望它继续用官方基座，给它单独指一个模型目录。
+- 不要把 `lora_adapter/` 目录删掉：重新合并、以及标记文件里记录的 adapter 校验和都要用到它。
+- `chatlaw/clear_files.py`（`chatlaw clear` / `chatlaw clear_files`）会整目录删掉 `llm`，检测到自定义权重标记时会打印警告——删掉后要重新合并。
+
+### 12.6 如何重新训练（模板、数据或基座变化时）
+
+只要动了 prompt 模板、微调数据或基座模型，就要重跑一遍完整链路：
+
+```bash
+cd ~/ChatLaw && source .venv/bin/activate      # 需要 peft / datasets / transformers / torch
+
+# 1) 准备数据集：develop/resources/finetuning_dataset/dataset.json
+#    格式为 JSON 数组，每条至少含 question / answer，可选 reference（法条列表）：
+#    [
+#      {"question": "…",
+#       "answer": "…",
+#       "reference": [{"law_name": "中华人民共和国民法典", "article": "第二百八十八条", "content": "…"}]}
+#    ]
+#    reference 写成结构化对象时，训练 prompt 里的法条块与线上检索结果完全一致。
+
+# 2) 切分训练/测试集（19:1，输出同目录 train.json / test.json）
+python develop/finetune/split_dataset.py
+
+# 3) LoRA 微调（配置常量在脚本头部：MAX_LENGTH / EPOCHS / LR / LoRA r 等）
+#    输出：develop/finetune/qwen3_4b_lora_finetuned + chatlaw/resources/llm/lora_adapter
+python develop/finetune/train_qwen3_finetune.py
+#    注意日志里的 [WARN]：prompt 占满 MAX_LENGTH 的样本 labels 全为 -100，等于没参与训练，
+#    出现较多时应精简参考法条或调大 MAX_LENGTH 后重跑。
+
+# 4) 合并导出（GPU 机器上会顺带打印基座 vs 合并模型的同题对比，确认 adapter 生效）
+python develop/finetune/merge_lora.py                # 先导出到独立目录
+python develop/finetune/merge_lora.py --in-place     # 确认后替换 resources/llm
+
+# 5) 重启服务端，确认启动日志出现「权重来源：本地自定义权重」
+```
+
+**训练前务必先确认模板是最终版**：`train_qwen3_finetune.py` 用的就是客户端 `build_prompt`，任何模板改动都要在训练之前落地，训练之后再改模板会让 adapter 与线上输入分布错配（只能重训）。
+
+
 *部署参考资料：模型来自 OpenI（`enter/QwenModel`/`enter/QwenTokenizer`），Pytorch 后端；如无 GPU 也可用 MindSpore 版 `server_ms`，但需另行配置 MindSpore 运行环境。*

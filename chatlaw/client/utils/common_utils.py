@@ -514,6 +514,8 @@ def _format_doc_block(item, idx: int):
 
 
 def build_prompt(question, docs):
+    # 本模板是训练与推理的公共契约：develop/finetune/train_qwen3_finetune.py 直接复用
+    # 本函数生成训练数据，改动这里必须重新微调，否则训练/推理的输入分布会不一致。
     blocks = []
 
     for i, doc in enumerate(docs, 1):

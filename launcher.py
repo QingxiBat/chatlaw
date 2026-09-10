@@ -136,7 +136,7 @@ def main():
             "可用指令包括：\n"
             "  chatlaw client <ms|pt> [其他参数]    启动客户端模式\n"
             "  chatlaw server <ms|pt> [其他参数]    启动服务端模式\n"
-            "  chatlaw clear                 清理 resources 文件夹\n"
+            "  chatlaw clear                 清理 resources 文件夹（等价于 chatlaw clear_files）\n"
             "\n"
             "说明：\n"
             "  - ms  表示使用MindNLP版本\n"
@@ -175,10 +175,12 @@ def main():
     server_parser.add_argument("extra", nargs=argparse.REMAINDER, help="传递给服务端脚本的额外参数")
 
     subparsers.add_parser(
-        "clear_files",
+        "clear",
+        aliases=["clear_files"],
         description=(
             "清理 chatlaw/resources 目录：\n"
-            "  删除资源缓存文件夹，删除前会进行确认。"
+            "  删除资源缓存文件夹，删除前会进行确认。\n"
+            "  等价写法：chatlaw clear_files"
         )
     )
 
@@ -188,7 +190,7 @@ def main():
         run_python_script(resolve_script_path("client", args.mode), args.extra)
     elif args.command == "server":
         run_python_script(resolve_script_path("server", args.mode), args.extra)
-    elif args.command == "clear":
+    elif args.command in ("clear", "clear_files"):
         run_python_script(os.path.join(get_project_root(), "clear_files.py"), [])
 
 

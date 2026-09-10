@@ -6,30 +6,42 @@
 2) 数据集从固定路径读取。
 3) 训练输出保存在本脚本同目录下新建的子目录中。
 4) LoRA 参数额外保存到 chatlaw/resources/llm/lora_adapter 目录下。
+5) 训练样本的 user content 直接复用客户端推理用的 build_prompt，
+   保证训练与推理的系统设定、约束文案、【法律条文】结构完全一致。
+
+微调完成后还需要合并导出才能被服务端加载：见 develop/finetune/merge_lora.py。
 """
 
 from __future__ import annotations
 
 import os
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-import torch
-from datasets import Dataset
-from transformers import (
+# 允许 `python develop/finetune/train_qwen3_finetune.py` 直接执行（此时脚本目录在 sys.path[0]，包不可见）
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+import torch  # pylint: disable=wrong-import-position
+from datasets import Dataset  # pylint: disable=wrong-import-position
+from transformers import (  # pylint: disable=wrong-import-position
     AutoModelForCausalLM,
     AutoTokenizer,
     Trainer,
     TrainingArguments,
     set_seed,
 )
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, TaskType, get_peft_model  # pylint: disable=wrong-import-position
 
-from chatlaw.dataloader import download_resources
-from launcher import get_resources_path
+# 训练与推理共用同一份 prompt 模板：这里复用桌面客户端的实现，
+# 避免两边各写一份文案导致分布漂移（客户端模板改了就必须重新训练）。
+from chatlaw.client.utils.common_utils import build_prompt as build_client_prompt  # pylint: disable=wrong-import-position
+from chatlaw.dataloader import download_resources  # pylint: disable=wrong-import-position
+from launcher import get_resources_path  # pylint: disable=wrong-import-position
 
 # =========================
 # 训练配置（按需直接修改此处）
@@ -134,20 +146,25 @@ def save_dropped_samples(dropped_samples: list[dict[str, Any]], output_path: Pat
 
 
 def build_user_content(example: dict[str, Any]) -> str:
+    """
+    渲染训练样本的 user content。
+
+    直接调用客户端推理用的 build_prompt，保证训练与推理的 prompt 逐字一致：
+    系统设定、"不得编造法条"等约束、【法律条文】（用户不可见）结构、【回答】结尾都在这里统一。
+    本函数只负责把样本字段规整成 build_prompt 需要的 (question, docs)。
+    """
     references = example.get("reference", [])
     if references is None:
         references = []
     if not isinstance(references, list):
-        references = [str(references)]
+        references = [references]
 
-    references_text = "\n".join(str(x).strip() for x in references if str(x).strip())
+    # reference 元素可以是结构化对象（含 law_name / article / content 时按客户端检索结果渲染），
+    # 也可以是纯字符串（按 "N. 原文" 渲染）
+    docs = [item for item in references if isinstance(item, dict) or str(item).strip()]
     question = str(example.get("question", "")).strip()
 
-    return (
-        "你是一名专业法律助手。请严格依据参考法条回答问题。\n\n"
-        f"【参考法条】\n{references_text}\n\n"
-        f"【用户问题】\n{question}\n"
-    )
+    return build_client_prompt(question, docs)
 
 
 def preprocess_function(example: dict[str, Any], tokenizer: AutoTokenizer) -> dict[str, Any]:
@@ -193,6 +210,8 @@ def preprocess_function(example: dict[str, Any], tokenizer: AutoTokenizer) -> di
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "labels": labels,
+        # 标记这类样本：prompt 已占满 MAX_LENGTH，labels 全为 -100，梯度为 0
+        "fully_masked": prompt_len >= len(input_ids),
     }
 
 
@@ -312,6 +331,19 @@ def main() -> None:
     print(f"[INFO] Tokenize 后样本数: {len(tokenized_dataset)}")
     print(f"[INFO] Tokenize 前过滤丢弃样本数: {dropped_count}")
 
+    # 这类样本只有 prompt（甚至被截断），labels 全为 -100，梯度为 0，需要在训练前就暴露出来
+    fully_masked = sum(1 for flag in tokenized_dataset["fully_masked"] if flag)
+    fully_masked_ratio = fully_masked / max(len(tokenized_dataset), 1)
+    if fully_masked:
+        print(
+            f"[WARN] 有 {fully_masked} 条/{len(tokenized_dataset)} 条"
+            f"（{fully_masked_ratio:.1%}）样本的 prompt 已达到 MAX_LENGTH={MAX_LENGTH}，"
+            "labels 全为 -100、梯度为 0，实际上没有参与训练。"
+            "建议精简参考法条、缩短问题，或提高 MAX_LENGTH。"
+        )
+    else:
+        print("[INFO] 没有出现 prompt 占满长度导致 labels 全为 -100 的样本。")
+
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=NUM_TRAIN_EPOCHS,
@@ -356,6 +388,9 @@ def main() -> None:
 
     print("[INFO] LoRA 微调完成")
     print(f"[INFO] LoRA adapter 已保存到: {lora_save_path}")
+    print("[INFO] 服务端要真正用上微调效果，还需把 adapter 合并进权重后再替换 resources/llm：")
+    print("       python develop/finetune/merge_lora.py            # 先导出到独立目录校验")
+    print("       python develop/finetune/merge_lora.py --in-place # 直接替换 resources/llm")
 
 
 if __name__ == "__main__":

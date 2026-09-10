@@ -1,5 +1,6 @@
+import json
 import os
-from typing import List
+from typing import List, Optional
 from launcher import get_resources_path
 
 llm_list = ["config.json",
@@ -38,6 +39,57 @@ vectorstore_list = ["law_article_index.json",
                     os.path.join("embedding_model", "tokenizer.json"),
                     os.path.join("embedding_model", "tokenizer_config.json"),
                     os.path.join("embedding_model", "vocab.txt")]
+
+# resources/llm 下存在该标记文件，说明里面放的是本地自定义权重（例如 LoRA 合并产物），
+# 此时不再从 OpenI 拉官方权重，避免把本地微调权重覆盖或混杂成官方权重。
+LLM_LOCAL_MARKER = ".chatlaw_local_model"
+
+
+def get_llm_local_marker_path() -> str:
+    """返回 resources/llm 下自定义权重标记文件的路径。"""
+    return os.path.join(get_resources_path(), "llm", LLM_LOCAL_MARKER)
+
+
+def is_llm_locally_managed() -> bool:
+    """判断 resources/llm 是否为本地自定义权重（标记文件存在即为是）。"""
+    return os.path.isfile(get_llm_local_marker_path())
+
+
+def read_llm_local_marker() -> Optional[dict]:
+    """
+    读取自定义权重标记的内容，用于启动日志展示。
+
+    Returns:
+        dict: 标记内容；文件不存在返回 None；内容不可解析时返回带 note 的 dict。
+    """
+    path = get_llm_local_marker_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as exc:
+        return {"note": f"标记文件存在但无法解析：{exc}"}
+    return data if isinstance(data, dict) else {"value": data}
+
+
+def write_llm_local_marker(payload: dict, llm_dir: Optional[str] = None) -> str:
+    """
+    写入自定义权重标记。
+
+    Args:
+        payload (dict): 来源信息（来源类型、生成时间、adapter 校验和等）
+        llm_dir (str): 目标 llm 目录，默认 resources/llm
+
+    Returns:
+        str: 标记文件的绝对路径
+    """
+    directory = llm_dir or os.path.join(get_resources_path(), "llm")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, LLM_LOCAL_MARKER)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return path
 
 
 def _openi():
@@ -100,12 +152,18 @@ def download_resources(resource_type):
             resource_type="tokenizer",
         )
     elif resource_type == "llm" and check_files_complete("llm", llm_list) is False:
-        _download_file(
-            "enter/QwenModel",
-            repo_type="dataset",
-            local_dir=os.path.join(get_resources_path(), "llm"),
-            resource_type="llm",
-        )
+        if is_llm_locally_managed():
+            print(
+                "[Data] resources/llm 存在本地自定义权重标记 "
+                f"{LLM_LOCAL_MARKER}，跳过 OpenI 官方权重下载。"
+            )
+        else:
+            _download_file(
+                "enter/QwenModel",
+                repo_type="dataset",
+                local_dir=os.path.join(get_resources_path(), "llm"),
+                resource_type="llm",
+            )
     elif resource_type == "audio_model" and check_files_complete("audio_model", audio_model_list) is False:
         _download_file(
             "enter/Paraformer",
@@ -150,4 +208,13 @@ def check_files_complete(resource_type: str, required_files: List[str]) -> bool:
     return True
 
 
-__all__ = ["download_resources"]
+__all__ = [
+    "download_resources",
+    "check_files_complete",
+    "llm_list",
+    "LLM_LOCAL_MARKER",
+    "get_llm_local_marker_path",
+    "is_llm_locally_managed",
+    "read_llm_local_marker",
+    "write_llm_local_marker",
+]

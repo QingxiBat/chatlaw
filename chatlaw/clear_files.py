@@ -5,6 +5,13 @@ ChatLaw 资源清理模块
 
 import os
 import shutil
+import sys
+
+# 兼容 `python chatlaw/clear_files.py` 直接执行：此时 sys.path[0] 是脚本目录，chatlaw 包不可见
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from chatlaw.dataloader.downloads import LLM_LOCAL_MARKER  # pylint: disable=wrong-import-position
 
 
 def get_resources_path():
@@ -39,6 +46,16 @@ def main():
             print(f"  - {t}")
     else:
         print("  （无可清理资源）")
+
+    # ===== 本地自定义权重（如 LoRA 合并产物）提醒 =====
+    llm_marker = os.path.join(resource_dir, "llm", LLM_LOCAL_MARKER)
+    if os.path.isfile(llm_marker):
+        print(
+            "\n⚠️  警告：chatlaw/resources/llm 中是本地自定义权重（看到 "
+            f"{LLM_LOCAL_MARKER}），不是 OpenI 官方权重。\n"
+            "    删除后不会自动恢复，需要重新执行 develop/finetune/merge_lora.py 合并，"
+            "或清掉该标记后等官方权重重新下载。"
+        )
 
     print(f"\n资源根目录：{resource_dir}")
 

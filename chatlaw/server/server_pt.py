@@ -13,7 +13,7 @@ from transformers import (
 )
 
 from chatlaw.configuration import config
-from chatlaw.dataloader import download_resources
+from chatlaw.dataloader import download_resources, read_llm_local_marker
 from chatlaw.network.http_transport import (
     read_json_request,
     read_pickle_request,
@@ -86,7 +86,8 @@ tokenizer_path = os.path.join(resource_path, "tokenizer").replace("\\", "/")
 tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
 
 model_path = os.path.join(resource_path, "llm").replace("\\", "/")
-if device_map == "npu":
+# 注意用 use_npu 判断：NPU 分支下 device_map 是 {"": npu_device} 这样的 dict，不是字符串
+if use_npu:
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         local_files_only=True,
@@ -104,6 +105,25 @@ else:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision("high")
 print("[Model] Qwen loaded successfully.")
+
+# resources/llm 可能是 OpenI 官方权重，也可能是本地 LoRA 合并出来的微调权重，
+# 两者日志必须能区分，否则排查"到底跑的是哪个模型"时只能靠猜。
+_marker = read_llm_local_marker()
+if _marker:
+    _lora = _marker.get("lora") or {}
+    print(
+        "[Model] 权重来源：本地自定义权重"
+        f"（合并时间 {_marker.get('created', '未知')}，r={_lora.get('r')}，"
+        f"adapter={_marker.get('adapter_dir')}）"
+    )
+else:
+    print("[Model] 权重来源：OpenI 官方 enter/QwenModel")
+print(
+    "[Model] "
+    f"model_type={getattr(model.config, 'model_type', None)} "
+    f"architectures={getattr(model.config, 'architectures', None)} "
+    f"dtype={getattr(model.config, 'torch_dtype', None)}"
+)
 
 
 def _set_session_state(*, active=None, heartbeat=None, clear_stop=False):

@@ -30,3 +30,8 @@ matplotlib
 pymupdf
 bitsandbytes; platform_system != "Windows" and python_version < "3.13"
 tqdm
+
+# LoRA 微调（develop/finetune/train_qwen3_finetune.py）与 adapter 合并导出
+# （develop/finetune/merge_lora.py）需要 peft。服务端推理不需要它：
+# 合并是在离线把 adapter 烧进权重，产物就是普通 transformers 模型。
+peft
