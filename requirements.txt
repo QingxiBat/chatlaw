@@ -17,9 +17,13 @@ faiss-cpu
 sentence-transformers
 pyside6
 
-# MindSpore / MindNLP is only needed by the server ms route.
-# It is unavailable for Windows/Python 3.13 in common package indexes.
-mindnlp>=0.5.1; platform_system == "Linux" and python_version < "3.13"
+# MindSpore / MindNLP is only needed by the server ms route (server_ms.py).
+# The PyTorch route (server_pt.py) does NOT need it.
+# It is unavailable on Windows, and also on Python 3.12+: mindnlp 0.5.1 pins
+# mindspore<=2.7.0 (>=2.5.0), and mindspore 2.5.0-2.7.0 only ships cp39/cp310/
+# cp311 wheels (no cp312). So the ms route requires Python <= 3.11 — see
+# requirements-server-ms.txt.
+mindnlp>=0.5.1; platform_system == "Linux" and python_version < "3.12"
 
 # develop / optional tooling
 matplotlib

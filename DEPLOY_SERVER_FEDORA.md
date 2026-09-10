@@ -221,6 +221,7 @@ curl -s -X POST http://127.0.0.1:6005/heartbeat -H 'Content-Type: application/js
 | 模型下载报「数据不存在或无权限」 | a) 缺 OpenI token（第 5 节）；b) 用了旧代码 `repo_type="model"`——应改为 `"dataset"`（已修复）。 |
 | `enter/QwenModel` 下下来只有个 zip / 模型在 llm/llm 里 | 数据集以 `llm.zip` 托管且**不自动解压**，需手动解压并整理到 `chatlaw/resources/llm/`（第 6 节方式 B）。 |
 | `import openi` 时 pip 装 uvloop 报错 | Linux 下 openi 需要 `uvloop`；venv 里 `pip install uvloop`，或确保 venv 带 pip。 |
+| `pip install` 报 **找不到 `mindnlp` 版本** | `mindnlp` **只有 MindSpore 路由（`server_ms`）需要**，PyTorch 路由（`server_pt`）不需要。且 mindnlp 0.5.1 依赖 `mindspore<=2.7.0`，这些 mindspore 版本**没有 Python 3.12 的 wheel**（只有 cp39/310/311）→ 故 3.12 下无法解析。**解决**：部署 PyTorch 路由（跳过 mindnlp，`requirements.txt` 已用 marker 在 3.12+ 自动跳过）；若确需 MS 路由，改用 **Python 3.11**。 |
 | `torch` 装不上 / 无对应版本 | 换 Python 3.12（用 `uv venv --python 3.12`）；torch 用 `--index-url` 指定国内镜像或 CUDA 版本。 |
 | 生成非常慢 / GPU 无法满负荷 | 显存或功耗受限（笔记本/节能）。检查 `nvidia-smi`；若显存不足 `device_map="auto"` 会回退 CPU 减缓速。可降低 `max_new_tokens` 或换更小模型。 |
 | 客户端连不上 | `SERVER_IP` 是否正确、防火墙 6005/6006 是否放行。 |

@@ -1,6 +1,11 @@
-# MindSpore/MindNLP server route dependencies.
+# MindSpore/MindNLP server route dependencies (server_ms.py).
 #
-# Use this on Linux/Ascend or another supported MindSpore platform,
-# preferably in the project-recommended Python 3.11 environment.
+# REQUIRES Python <= 3.11 (project-recommended: Python 3.11).
+# Reason: mindnlp 0.5.1 pins mindspore<=2.7.0,>=2.5.0, and mindspore 2.5.0-2.7.0
+# only ships cp39/cp310/cp311 wheels (no cp312/cp313). On Python 3.12+ pip cannot
+# resolve `mindnlp` and fails with "No matching distribution found for mindnlp".
+#
+# The PyTorch route (server_pt.py + requirements.txt) does NOT need mindnlp and
+# runs fine on Python 3.10-3.12.
 
 mindnlp>=0.5.1
