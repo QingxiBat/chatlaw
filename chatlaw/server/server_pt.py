@@ -122,7 +122,7 @@ print(
     "[Model] "
     f"model_type={getattr(model.config, 'model_type', None)} "
     f"architectures={getattr(model.config, 'architectures', None)} "
-    f"dtype={getattr(model.config, 'torch_dtype', None)}"
+    f"dtype={getattr(model.config, 'dtype', None)}"
 )
 
 

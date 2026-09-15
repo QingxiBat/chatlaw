@@ -244,8 +244,8 @@ def merge_adapter(model: Any, adapter_dir: Path, merge_dtype: str) -> Any:
         print("[Merge] 合并精度为 fp32，保存前转回 bfloat16。")
         merged.to(torch.bfloat16)
 
-    # 服务端用 dtype="auto" 加载，config.torch_dtype 必须与真实精度一致，否则会被当成 fp32 加载
-    merged.config.torch_dtype = torch.bfloat16
+    # 服务端用 dtype="auto" 加载，config.dtype 必须与真实精度一致，否则会被当成 fp32 加载
+    merged.config.dtype = torch.bfloat16
     merged.config.use_cache = True
     return merged
 

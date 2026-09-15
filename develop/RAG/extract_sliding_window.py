@@ -117,7 +117,7 @@ def load_model(model_name: str = MODEL_NAME, device: str = "auto"):
     
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype="auto",
+        dtype="auto",
         device_map=device,
         trust_remote_code=True
     )
