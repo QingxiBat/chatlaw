@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import zipfile
 from typing import List, Optional
 from launcher import get_resources_path
 
@@ -130,6 +132,97 @@ def _download_file(repo_id, repo_type, local_dir, resource_type):
         ) from exc
 
 
+def _locate_payload_dir(staging_dir: str, required_files: List[str]):
+    """
+    在解压产物中定位真正的载荷目录（即存放资源文件的那一层）。
+
+    归档的顶层目录并不固定：`llm.zip` 内以 `llm/` 为顶层目录，也存在文件直接
+    平铺在归档根下的情况，因此按「是否包含任一必需文件」判定，比较文件名。
+
+    Args:
+        staging_dir (str): 解压产物的临时目录。
+        required_files (List[str]): 目标资源的必需文件列表。
+
+    Returns:
+        str | None: 载荷目录路径；未找到时返回 None。
+    """
+    wanted = set(os.path.basename(name) for name in required_files)
+    for root, _dirs, files in os.walk(staging_dir):
+        if wanted & set(files):
+            return root
+    return None
+
+
+def _extract_archives(target_dir: str, required_files: List[str]) -> None:
+    """
+    解压 target_dir 下的 zip 归档，并把载荷整理到 target_dir 根下。
+
+    启智社区的 QwenModel 数据集把整个模型打包为单个 llm.zip 托管，而
+    `openi_download_file` 只负责下载、不会解压；缺少这一步，`from_pretrained`
+    会因为目录里只有 zip 而报 `Unrecognized model ... model_type`。
+
+    Args:
+        target_dir (str): 资源目录，解压后的文件会平铺在此目录下。
+        required_files (List[str]): 该资源的必需文件列表，用于定位载荷目录。
+
+    Raises:
+        RuntimeError: 磁盘空间不足、归档损坏，或归档内找不到必需文件。
+    """
+    for entry in sorted(os.listdir(target_dir)):
+        if not entry.lower().endswith(".zip"):
+            continue
+
+        archive = os.path.join(target_dir, entry)
+        if not os.path.isfile(archive):
+            continue
+
+        staging_dir = os.path.join(target_dir, "_extract_tmp")
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+        try:
+            with zipfile.ZipFile(archive) as archive_file:
+                unpacked_size = sum(info.file_size for info in archive_file.infolist())
+                free_size = shutil.disk_usage(target_dir).free
+                if free_size < unpacked_size:
+                    raise RuntimeError(
+                        f"Not enough disk space to extract {archive}: needs about "
+                        f"{unpacked_size / 1e9:.1f}GB, only {free_size / 1e9:.1f}GB free."
+                    )
+
+                print(f"[Resource] Extracting {entry} ({unpacked_size / 1e9:.1f}GB)...")
+                archive_file.extractall(staging_dir)
+        except zipfile.BadZipFile as exc:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            raise RuntimeError(
+                f"{archive} is corrupt or incomplete ({exc}). Delete it and retry, "
+                "or re-download with openi_download_file(..., force=True)."
+            ) from exc
+        except RuntimeError:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            raise
+
+        payload_dir = _locate_payload_dir(staging_dir, required_files)
+        if payload_dir is None:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            raise RuntimeError(
+                f"{archive} does not contain any of the expected files {required_files}; "
+                "check the archive layout."
+            )
+
+        for name in os.listdir(payload_dir):
+            source = os.path.join(payload_dir, name)
+            destination = os.path.join(target_dir, name)
+            if os.path.isdir(destination):
+                shutil.rmtree(destination)
+            elif os.path.exists(destination):
+                os.remove(destination)
+            shutil.move(source, destination)
+
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        os.remove(archive)
+        print(f"[Resource] {entry} extracted into {target_dir}.")
+
+
 def download_resources(resource_type):
     """
         根据缺少的文件通过启智社区下载补齐。
@@ -152,6 +245,7 @@ def download_resources(resource_type):
             resource_type="tokenizer",
         )
     elif resource_type == "llm" and check_files_complete("llm", llm_list) is False:
+        llm_dir = os.path.join(get_resources_path(), "llm")
         if is_llm_locally_managed():
             print(
                 "[Data] resources/llm 存在本地自定义权重标记 "
@@ -161,9 +255,20 @@ def download_resources(resource_type):
             _download_file(
                 "enter/QwenModel",
                 repo_type="dataset",
-                local_dir=os.path.join(get_resources_path(), "llm"),
+                local_dir=llm_dir,
                 resource_type="llm",
             )
+            # 该数据集以单个 llm.zip 托管模型，解压整理后才能被 from_pretrained 识别。
+            _extract_archives(llm_dir, llm_list)
+            if check_files_complete("llm", llm_list) is False:
+                missing = [
+                    name for name in llm_list
+                    if not os.path.isfile(os.path.join(llm_dir, name))
+                ]
+                raise RuntimeError(
+                    f"Model files still missing under {llm_dir}: {missing}. "
+                    f"Delete {llm_dir} and restart the server to re-download."
+                )
     elif resource_type == "audio_model" and check_files_complete("audio_model", audio_model_list) is False:
         _download_file(
             "enter/Paraformer",
