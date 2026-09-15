@@ -2,7 +2,7 @@
 
 > 目标：在一台装有 NVIDIA GPU 的 **Fedora（或同类 Linux）** 上，部署并运行 ChatLaw 服务端（`server_pt` 为 PyTorch 版；`server_ms` 为 MindSpore 版），并验证它能被客户端以 HTTP POST 方式连接、加载模型并完成推理。
 >
-> 本指南基于一次**实际在 WSL/Ubuntu 上排障到可运行**的经历编写，把踩过的坑（缺 C 编译器、OpenI 模型是数据集需要登录 token、模型以 zip 形式托管需解压等）都写了出来，可直接照着做，也适合交给 AI 按步骤执行。
+> 本指南基于一次**实际在 WSL/Ubuntu 上排障到可运行**的经历编写，把踩过的坑（缺 C 编译器、OpenI 模型是数据集、模型以 `llm.zip` 形式托管需解压、token 路径会被 `HOME` 覆盖改写等）都写了出来，可直接照着做，也适合交给 AI 按步骤执行。
 
 ---
 
@@ -104,19 +104,26 @@ which gcc gcc++ clang cc 2>/dev/null
 
 ---
 
-## 5. 准备 OpenI Token（下载模型必须）
+## 5. 准备 OpenI Token
 
-- 模型 `enter/QwenModel` 与 tokenizer `enter/QwenTokenizer` 在 OpenI（https://openi.pcl.ac.cn）上托管，**模型仓库需要账号授权**（tokenizer 可匿名，模型不能）。
-- 登录 OpenI 后，到 `https://openi.pcl.ac.cn/user/settings/applications` 获取 **访问 Token**。
-- 之后服务端启动会自动调用 `download_resources`，需要该 Token 才能拉到模型。
+- 模型 `enter/QwenModel` 与 tokenizer `enter/QwenTokenizer` 在 OpenI（https://openi.pcl.ac.cn）上托管。**实测这两个数据集都是公开的**（`is_private: false`、`can_download: true`），不配 Token 也能下载；只有遇到「数据不存在或无权限」时才需要登录。
+- 需要 Token 时：登录 OpenI 后，到 `https://openi.pcl.ac.cn/user/settings/applications` 获取 **访问 Token**。
 
-**配置/保存 Token**（用 openi 登录将 Token 写入本地）：
+> ⚠️ **Token 路径的坑（文档旧版写错了）**：`chatlaw/dataloader/downloads.py` 的 `_openi()` 会在 `import openi` **之前**把 `HOME` 覆盖成**仓库下的 `.openi_home/`**；而 openi 的常量 `OPENI_ROOT = Path.home() / ".openi"` 是在 import 时解析的。所以 **`download_resources` 实际读取的是 `<仓库>/.openi_home/.openi/token.json`**，把 token 写到 `$HOME/.openi/token.json`（按旧文档的做法）对服务端**完全无效**。
+>
+> 要在正确的 HOME 覆盖下登录，用下面这条命令（注意 `HOME=` 前缀）：
+
 ```bash
 cd ~/ChatLaw
 export OPENI_TOKEN='你的Token'
-# 用项目里的 openi（已装）登录，Token 默认存到 $HOME/.openi/token.json，download_resources 会读取
-python -c "import os; from openi import login; login(token=os.environ['OPENI_TOKEN'], endpoint='https://openi.pcl.ac.cn')"
+HOME="$PWD/.openi_home" python -c "
+import os
+from openi import login
+login(token=os.environ['OPENI_TOKEN'], endpoint='https://openi.pcl.ac.cn')
+"
 ```
+
+`login()` 会先用该 Token 请求一次用户信息来校验：格式不合法会直接 `exit(1)`；服务端返回 401 会打印「登陆失败！此令牌无效」并且**不写入** token 文件。所以不会出现「看起来保存成功、实际无权限」的情况。（`.openi_home/` 已在 `.gitignore` 中，不会被提交。）
 
 ---
 
@@ -124,35 +131,48 @@ python -c "import os; from openi import login; login(token=os.environ['OPENI_TOK
 
 服务端 `server_pt.py` 在启动时会执行 `download_resources("tokenizer")` 与 `download_resources("llm")`，**缺文件才下载**。所以有两种方式：
 
-### 方式 A：让服务端自动下载（需第 5 节 Token）
-直接启动服务端即可，它会往 `chatlaw/resources/tokenizer`、`chatlaw/resources/llm` 下载。
+### 方式 A：让服务端自动下载（推荐）
+直接启动服务端即可，它会往 `chatlaw/resources/tokenizer`、`chatlaw/resources/llm` 补齐缺失的文件。
 
-> ⚠️ **已修复的坑**：仓库里 `chatlaw/dataloader/downloads.py` 曾经把模型下载写成 `repo_type="model"`，但 **`enter/QwenModel` 在 OpenI 上是「数据集」**，必须用 `repo_type="dataset"`。该 bug 已在 commit `ca06528` 修复；若你用的是旧代码，请确认 `repo_type="dataset"`，否则会报「数据不存在或无权限」。
+**模型是 zip 托管，服务端会自动解压。** `enter/QwenModel` 里只有单个 `llm.zip`（压缩后约 6.4GB，**解压后约 8.05GB**），而 `openi_download_file` 只会下载、不会解压。现行代码在下载完成后会调用 `_extract_archives()` 自动完成「解压 → 把 zip 内一层 `llm/` 里的 6 个文件上移到 `resources/llm/` → 删除 zip」，这一步无需人工介入。启动时你会看到：
 
-### 方式 B：手动放置（推荐，代码更可控）
-1. 用 openi 把 `enter/QwenModel` 以**数据集**方式下载（可用一个独立小环境只装 `openi`）：
+```
+[Resource] Extracting llm.zip (8.1GB)...
+[Resource] llm.zip extracted into .../chatlaw/resources/llm.
+```
+
+> ⚠️ **解压需要瞬时额外空间**：解压期间 `llm.zip`（6.4GB）与产物（8.05GB）会同时存在，请确保 `chatlaw/resources` 所在分区**至少还有 8.1GB 可用**。空间不足会立刻报 `Not enough disk space to extract ...`（并保留 zip 以便直接重试），而不是解压到一半失败。成功后 zip 被删除，净占用回到约 8GB。
+
+> ⚠️ **两个历史坑（跑旧代码时会遇到）**：
+> 1. 模型下载曾写成 `repo_type="model"`，但 **`enter/QwenModel` 在 OpenI 上是「数据集」**，必须用 `repo_type="dataset"`，否则报「数据不存在或无权限」。已由 commit `ca06528` 修复。
+> 2. 只下载 zip 而不解压时，加载模型会报
+>    `ValueError: Unrecognized model in .../resources/llm. Should have a model_type key in its config.json`。
+>    这就是「`resources/llm/` 里只有 `llm.zip`」的典型症状。注意在旧代码下**重启服务端并不会自愈**（下载器按文件名判重，看到 zip 已存在就跳过下载，既不重下也不解压）；升级到含 `_extract_archives()` 的代码后重启即自动修复，或按下面方式 B 手工解压。
+
+### 方式 B：手动放置（想自己控制下载/解压时）
+1. 用 openi 把 `enter/QwenModel` 以**数据集**方式下载：
    ```python
    import openi
    openi.openi_download_file(
        "enter/QwenModel", repo_type="dataset",
-       local_dir="chatlaw/resources", max_workers=10,
+       local_dir="chatlaw/resources/llm", max_workers=10,
        token="你的Token", endpoint="https://openi.pcl.ac.cn",
    )
    ```
-2. 该数据集只有单个文件 `llm.zip`，下载后**不会自动解压**，需手动解压并放到正确位置：
+   `local_dir` 直接指向 `chatlaw/resources/llm`（现行代码就是这么调的），所以 zip 会落在 **`chatlaw/resources/llm/llm.zip`**，而不是旧文档写的 `chatlaw/resources/llm.zip`。
+2. 该数据集只有单个文件 `llm.zip`（约 6.4GB），下载后**不会自动解压**，且 **zip 内自带一层 `llm/` 目录**，需解压后上移一层：
    ```bash
-   cd chatlaw/resources
-   # 解压 zip 后模型文件通常在 llm/ 子目录，需上移一层
-   unzip llm.zip -d llm_tmp
-   mkdir -p llm
-   mv llm_tmp/*/* llm/  2>/dev/null || mv llm_tmp/llm/* llm/ 2>/dev/null
-   # 使 llm/ 下直接有 config.json / model.safetensors.index.json / model-0000x-*.safetensors
+   cd chatlaw/resources/llm
+   unzip -t llm.zip            # 先校验 CRC，正常输出 "No errors detected"
+   unzip -q llm.zip -d llm_tmp
+   mv llm_tmp/llm/* .          # 关键：zip 内顶层就是 llm/，必须上移一层
    rm -rf llm_tmp llm.zip
-   ls llm/   # 应看到 config.json, generation_config.json, model-00001-of-00003.safetensors ...
+   ls                          # 应看到 config.json, generation_config.json,
+                               # model.safetensors.index.json, model-00001..00003-of-00003.safetensors
    ```
-3. tokenizer 同理可自动或手动放到 `chatlaw/resources/tokenizer/`（含 `tokenizer.json`, `vocab.json`, `merges.txt`, `tokenizer_config.json`）。
+3. tokenizer 可自动下载，也可手动放到 `chatlaw/resources/tokenizer/`（含 `tokenizer.json`, `vocab.json`, `merges.txt`, `tokenizer_config.json`）。它的数据集是**平铺目录**（远端路径形如 `tokenizer/merges.txt`），`local_dir` 指向 `chatlaw/resources` 时正好落成 `resources/tokenizer/`，**无需解压或整理**。
 
-> 验证模型齐全：`chatlaw/resources/llm/config.json`、`model.safetensors.index.json`、3 个 `model-*.safetensors` 缺一不可；`chatlaw/resources/tokenizer/` 四个文件齐全。
+> 验证模型齐全：`chatlaw/resources/llm/config.json`、`model.safetensors.index.json`、3 个 `model-*.safetensors` 缺一不可（三个 safetensors 合计约 8GB）；`chatlaw/resources/tokenizer/` 四个文件齐全。缺任何一个都会在加载阶段报错，不会静默降级。
 
 ---
 
@@ -218,8 +238,11 @@ curl -s -X POST http://127.0.0.1:6005/heartbeat -H 'Content-Type: application/js
 | 现象 | 原因 / 解决 |
 |---|---|
 | `Failed to find C compiler` / `ld.lld: unable to find library -l:libcuda.so.1` | **缺 C 工具链**。`sudo dnf groupinstall "Development Tools"`，装 gcc/g++/binutils。 |
-| 模型下载报「数据不存在或无权限」 | a) 缺 OpenI token（第 5 节）；b) 用了旧代码 `repo_type="model"`——应改为 `"dataset"`（已修复）。 |
-| `enter/QwenModel` 下下来只有个 zip / 模型在 llm/llm 里 | 数据集以 `llm.zip` 托管且**不自动解压**，需手动解压并整理到 `chatlaw/resources/llm/`（第 6 节方式 B）。 |
+| 模型下载报「数据不存在或无权限」 | a) 用了旧代码 `repo_type="model"`——应改为 `"dataset"`（已修复）；b) 确实需要 token 时，注意它必须落在 `<仓库>/.openi_home/.openi/token.json`（第 5 节），写到 `~/.openi/` 无效。 |
+| `Unrecognized model in .../resources/llm. Should have a model_type key in its config.json` | `resources/llm/` 里只有 `llm.zip`、没有解压后的模型文件。现行代码会自动解压（第 6 节方式 A）；若日志里已出现「本地已存在 1 个文件」却仍报此错，说明跑的是旧代码，按方式 B 手工解压即可。 |
+| `Not enough disk space to extract ...` | 解压 `llm.zip` 需瞬时额外约 8.1GB（zip 6.4GB 与产物 8.05GB 并存）。腾出空间后重启即可，代码会保留 zip 以便直接重试。 |
+| `... is corrupt or incomplete (BadZipFile)` | 下载被中断导致 zip 不完整。删除 `chatlaw/resources/llm/llm.zip` 后重启服务端，或用 `openi_download_file(..., force=True)` 强制重下。 |
+| `enter/QwenModel` 下下来只有个 zip / 模型在 llm/llm 里 | 数据集以 `llm.zip` 托管，且 zip 内自带一层 `llm/`。现行代码会自动解压并上移一层；手工处理见第 6 节方式 B。 |
 | `import openi` 时 pip 装 uvloop 报错 | Linux 下 openi 需要 `uvloop`；venv 里 `pip install uvloop`，或确保 venv 带 pip。 |
 | `pip install` 报 **找不到 `mindnlp` 版本** | `mindnlp` **只有 MindSpore 路由（`server_ms`）需要**，PyTorch 路由（`server_pt`）不需要。且 mindnlp 0.5.1 依赖 `mindspore<=2.7.0`，这些 mindspore 版本**没有 Python 3.12 的 wheel**（只有 cp39/310/311）→ 故 3.12 下无法解析。**解决**：部署 PyTorch 路由（跳过 mindnlp，`requirements.txt` 已用 marker 在 3.12+ 自动跳过）；若确需 MS 路由，改用 **Python 3.11**。 |
 | `torch` 装不上 / 无对应版本 | 换 Python 3.12（用 `uv venv --python 3.12`）；torch 用 `--index-url` 指定国内镜像或 CUDA 版本。 |
@@ -236,7 +259,7 @@ curl -s -X POST http://127.0.0.1:6005/heartbeat -H 'Content-Type: application/js
 > 1. 安装基础工具与 **C/C++ 工具链**（Development Tools），确认 `gcc --version` 可用。
 > 2. 安装 NVIDIA 驱动（RPM Fusion 的 `akmod-nvidia` 或 CUDA toolkit），`nvidia-smi` 正常。
 > 3. 用 Python 3.12 + venv（或 `uv venv --python 3.12`）克隆仓库并 `pip install -r requirements.txt`（torch 装 CUDA 版）。
-> 4. 用 OpenI 访问令牌 `openi.login(token=...)`，确保 `enter/QwenModel`（**dataset 类型**）与 `enter/QwenTokenizer` 能下载；若走手动，把模型解压整理到 `chatlaw/resources/llm`、tokenizer 到 `chatlaw/resources/tokenizer`。
+> 4. 若需登录，在 `HOME=<仓库>/.openi_home` 下执行 `openi.login(token=...)`（第 5 节），确认 `enter/QwenModel`（**dataset 类型**）与 `enter/QwenTokenizer` 可访问；模型归档 `llm.zip` 由服务端自动解压（第 6 节方式 A，瞬时需约 8.1GB 额外空间）；若走手动，则把 zip 内一层 `llm/` 中的文件解压到 `chatlaw/resources/llm`、tokenizer 放到 `chatlaw/resources/tokenizer`。
 > 5. 配置 `chatlaw/config.yaml` 的 `SERVER_IP`，放行 6005/6006。
 > 6. 启动 `python -m chatlaw.server.server_pt`，确认监听 6005/6006。
 > 7. 用 curl 验证 `/health`、`/heartbeat`；用客户端验证 `/infer` 能返回模型文本。
