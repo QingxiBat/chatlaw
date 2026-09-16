@@ -97,7 +97,14 @@ def parse_args() -> argparse.Namespace:
         help="pooling 方式；默认从 1_Pooling/config.json 读取，读不到时需显式指定",
     )
     parser.add_argument("--max-length", type=int, default=None, help="导出跟踪用的序列长度")
-    parser.add_argument("--opset", type=int, default=17, help="ONNX opset 版本")
+    parser.add_argument(
+        "--opset",
+        type=int,
+        default=18,
+        help="ONNX opset 版本。默认 18：torch 的 dynamo 导出器本身就产出 opset 18 的算子"
+             "（LayerNormalization），强行降到 17 会触发一次注定失败的版本转换并打印报错。"
+             "Android 侧 onnxruntime==1.27.0 支持远高于 18 的 opset，无需下调。",
+    )
     parser.add_argument(
         "--single-file",
         action="store_true",
@@ -212,7 +219,15 @@ def build_wrapper(transformer_dir: Path, pooling: str):
 
             return torch.nn.functional.normalize(pooled, p=2, dim=1)
 
-    backbone = AutoModel.from_pretrained(str(transformer_dir))
+    backbone = AutoModel.from_pretrained(
+        str(transformer_dir),
+        # 必须用 eager attention。默认的 SDPA 会把 mask 的动态形状烘焙进图里，
+        # 导出后 LayerNormalization 节点的缓冲区按 batch=1 定死：签名仍写着
+        # 'batch'，但实际只能跑 batch=1（batch>1 会报 buffer shape mismatch）。
+        # 实测（torch 2.11 + transformers 5.5）：不加这个参数时 batch=3 必失败；
+        # 加上后 batch=1/3 都正常，且输出仍与 sentence-transformers 一致。
+        attn_implementation="eager",
+    )
     wrapper = _PooledNormalizedEncoder(backbone, pooling)
     wrapper.eval()
     return wrapper
@@ -262,7 +277,7 @@ def export_onnx(wrapper, tokenizer, out_path: Path, max_length: int, opset: int,
             torch.onnx.export(wrapper, (input_ids, attention_mask), str(out_path), **kwargs)
 
 
-def describe_and_verify(out_path: Path, tokenizer, max_length: int) -> bool | None:
+def describe_and_verify(out_path: Path, model_dir: Path, tokenizer, max_length: int) -> bool | None:
     """打印产物签名并做数值校验。返回 True/False，无法校验时返回 None。"""
     try:
         import numpy as np  # pylint: disable=import-outside-toplevel
@@ -290,7 +305,16 @@ def describe_and_verify(out_path: Path, tokenizer, max_length: int) -> bool | No
         print(f"[FAIL] 模型声明了 tokenizer 没有提供的输入 {missing}，消费方无法凑齐 feed。")
         return False
 
-    got = session.run(None, feeds)[0]
+    # 故意用 batch>1 验证：这样能测出「batch 维被烘焙成 1」的坏图 —— 那种图签名写着
+    # 'batch'，却在 batch>1 时报 buffer shape mismatch。设备上的消费方只用 batch=1，
+    # 所以这种坏图能一路骗过 batch=1 的检查并在真机上正常工作。
+    try:
+        got = session.run(None, feeds)[0]
+    except Exception as exc:  # pylint: disable=broad-except
+        print(f"[FAIL] ONNX 推理失败（batch={len(VERIFY_TEXTS)}）：{type(exc).__name__}: {exc}")
+        print("       最常见原因：导出时 batch 维被冻结。基座必须用 attn_implementation='eager' 加载。")
+        return False
+
     norms = np.linalg.norm(got, axis=1)
     print(f"[ONNX] 输出形状 {got.shape}；L2 范数 {np.round(norms, 6).tolist()}（应全为 1.0，证明 normalize 已入图）")
 
@@ -300,9 +324,6 @@ def describe_and_verify(out_path: Path, tokenizer, max_length: int) -> bool | No
         print(f"[SKIP] 未安装 sentence-transformers，跳过基准对比（{exc}）")
         return None
 
-    model_dir = out_path.parent
-    if not (model_dir / "modules.json").is_file():
-        model_dir = Path(get_resources_path()).joinpath(*DEFAULT_MODEL_SUBDIR)
     try:
         reference = SentenceTransformer(str(model_dir)).encode(
             list(VERIFY_TEXTS), normalize_embeddings=True, convert_to_numpy=True
@@ -379,7 +400,7 @@ def main() -> int:
         return 0
 
     print()
-    verdict = describe_and_verify(out_path, tokenizer, max_length)
+    verdict = describe_and_verify(out_path, model_dir, tokenizer, max_length)
     if verdict is None:
         print("[Verify] 未验证（缺少 onnxruntime 或 sentence-transformers）—— 不要当作通过。")
         return 0
