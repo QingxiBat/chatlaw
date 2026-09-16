@@ -2,6 +2,7 @@
 
 # ChatLaw
 
+跨平台智能法律咨询系统 — **服务端推理（PyTorch / MindSpore 双臂线） + Flutter 客户端**
 
 </div>
 
@@ -11,26 +12,19 @@
 
 - [项目介绍](#项目介绍)
   - [🌐 模型推理技术路线](#-模型推理技术路线)
-  - [💻 客户端--服务端平台支持](#-客户端--服务端平台支持)
+  - [💻 客户端 / 服务端平台支持](#-客户端--服务端平台支持)
 - [软件架构](#软件架构)
-  - [1 项目目录（随项目开发更新）](#1项目目录随项目开发更新)
-  - [2 项目结构图](#2项目结构图)
-  - [3 主要开发工具](#3主要开发工具)
-- [安装教程](#安装教程)
-  - [1 安装Anaconda3](#1-安装anaconda3)
-  - [2 安装Git](#2-安装git)
-  - [3 安装ChatLaw](#3-安装chatlaw)
-- [使用说明](#使用说明)
-  - [1 检验是否安装成功](#1-检验是否安装成功)
-  - [2 使用前准备](#2-使用前准备)
-    - [2.1 客户端准备](#21-客户端准备)
-    - [2.2 服务端准备](#22-服务端准备)
-  - [3 启动方法](#3-启动方法)
-    - [3.1 客户端启动方法](#31-客户端启动方法)
-    - [3.2 服务端启动方法](#32-服务端启动方法)
-  - [4 使用演示](#4使用演示)
-  - [5 数据清理](#5数据清理)
-- [卸载方法](#卸载方法)
+  - [1 目录结构](#1-目录结构)
+  - [2 数据流](#2-数据流)
+  - [3 主要开发工具](#3-主要开发工具)
+- [快速开始](#快速开始)
+  - [1 安装](#1-安装)
+  - [2 启动服务端](#2-启动服务端)
+  - [3 客户端](#3-客户端)
+  - [4 命令行工具](#4-命令行工具)
+  - [5 数据清理与卸载](#5-数据清理与卸载)
+- [离线工具链（develop）](#离线工具链develop)
+- [文档索引](#文档索引)
 - [参与贡献](#参与贡献)
 - [其他说明](#其他说明)
 
@@ -38,317 +32,317 @@ ___
 
 ## 项目介绍
 
-**ChatLaw** 是一款跨平台的智能法律咨询系统，基于 **Qwen3 大语言模型** 和 **C/S（Client/Server）架构** 设计。系统通过客户端与服务端协同工作，实现语音输入、法律知识检索与大模型推理等核心能力。
+**ChatLaw** 是一款跨平台的智能法律咨询系统，基于 **Qwen3-4B 大语言模型** 和 **C/S（Client/Server）架构** 设计。系统通过客户端与服务端协同工作，实现语音输入、法律知识检索与大模型推理等核心能力。
 
-在 **客户端**，用户可通过麦克风进行语音提问。客户端负责完成语音识别、知识库检索、文本向量化等前置处理，并对服务端返回的推理结果进行解码和流式展示。
+- **客户端**：接收用户语音或文字输入，完成语音识别（ASR）、法律知识库检索（RAG）、prompt 构建与分词，把分词结果发给服务端；对服务端返回的结果做流式展示。客户端**不执行大模型推理**。
+- **服务端**：接收客户端发来的张量输入，调用大模型执行推理，并把生成结果以分帧流式方式回传。
 
-在 **服务端**，系统接收来自客户端的输入，调用大模型执行推理任务，并将生成结果实时回传，实现高效、低延迟的交互体验。
-
-**ChatLaw** 通过模块化设计，构建了集 **语音输入、知识检索、向量化处理、大模型推理、流式传输** 为一体的完整流程，为用户提供便捷且准确的法律咨询服务。
+推理框架、硬件后端、客户端形态三者解耦：服务端可在 PyTorch 与 MindSpore 之间二选一，客户端是独立的 Flutter 应用。
 
 ### 🌐 模型推理技术路线
 
-**ChatLaw** 提供两条可自由选择的推理技术路线：
+| 路线 | 框架 | 入口 | 说明 |
+|---|---|---|---|
+| **PyTorch 路线** | PyTorch + Transformers | `python -m chatlaw.server.server_pt` | 通用，GPU / CPU 均可，Python 3.10–3.12 |
+| **MindSpore 路线** | MindSpore + MindNLP | `python -m chatlaw.server.server_ms` | 昇腾 NPU，**需 Python ≤ 3.11**（依赖见 `requirements-server-ms.txt`） |
 
-- **MindSpore 技术路线**：使用 MindSpore + MindNLP；
-- **PyTorch 技术路线**：使用 PyTorch + Transformers。
-
-两条路线均可在 **GPU** 和 **昇腾 NPU** 上运行，用户可根据使用习惯、依赖环境或部署需求灵活部署。
+两条路线共用同一套 HTTP 协议与配置，客户端无需区分。
 
 ---
 
 ### 💻 客户端 / 服务端平台支持
 
-| 组件类型 | 支持平台 / 系统 | 支持的推理框架 | 支持的硬件后端 |
-|----------|------------------|------------------|------------------|
-| **客户端** | Windows / Linux / macOS | 无（不执行推理） | 无（不执行推理） |
-| **服务端** | **Linux（必需）** | MindSpore / PyTorch | GPU / 昇腾 NPU |
+| 组件类型 | 位置 | 支持平台 | 推理框架 | 硬件后端 |
+|---|---|---|---|---|
+| **客户端** | [`chatlaw-flutter-client`](chatlaw-flutter-client)（git submodule） | Android（已真机验证）；Flutter 桌面壳（Linux/Windows） | 无（不执行推理） | 无 |
+| **服务端** | `chatlaw/server/` | **Linux（必需）** | MindSpore / PyTorch | NVIDIA GPU / 昇腾 NPU |
 
-客户端主要负责语音输入、检索与展示，不涉及 AI 加速；
-服务端承担大模型推理，可自由选择推理框架与硬件后端组合。
+客户端负责语音输入、检索与展示，不涉及 AI 加速；服务端承担大模型推理，可自由选择推理框架与硬件后端组合。
 
 ---
 
 ## 软件架构
-### 1.项目目录（随项目开发更新）
-```
+
+### 1.目录结构
+
+> 由 `git ls-files` 实际生成（`chatlaw-flutter-client` 为 submodule，内容不在此展开）。
+
+```text
 ChatLaw/
-  ├── setup.py
-  ├── scripts
-  │   ├── static_ip_server.sh
-  │   ├── static_ip_mac_client.sh
-  │   ├── static_ip_linux_client.sh
-  │   ├── pylint_check.sh
-  │   ├── push_to_all_repositories
-  │   ├── orangepi
-  │   │   ├── README.md
-  │   │   ├── 310p
-  │   │   │   ├── preparation.sh
-  │   │   │   ├── mindspore_installer.sh
-  │   │   │   └── CANN_installer.sh
-  │   │   └── 310b
-  │   │       ├── preparation.sh
-  │   │       ├── mindspore_installer.sh
-  │   │       ├── CANN_installer.sh
-  │   │       └── aclinit.json
-  │   ├── dhcp_mac_client.sh
-  │   ├── dhcp_linux_server.sh
-  │   └── dhcp_linux_client.sh
-  ├── requirements.txt
-  ├── README.md
-  ├── MANIFEST.in
-  ├── LICENSE
-  ├── launcher.py
-  ├── launcher_gui.py
-  ├── develop
-  │   ├── RAG
-  │   │   ├── verify_extraction.py
-  │   │   ├── utils.py
-  │   │   ├── try_rag.py
-  │   │   ├── law_pdf_to_json.py
-  │   │   ├── extract_sliding_window.py
-  │   │   ├── extract_regex_llm_repair.py
-  │   │   ├── extract_law_pure_regex.py
-  │   │   ├── build_vectorstore.py
-  │   │   └── batch_extract_all_laws.py
-  │   └── finetune
-  │       ├── train_qwen3_finetune.py
-  │       └── split_dataset.py
-  ├── chatlaw
-  │   ├── server
-  │   │   ├── server_pt.py
-  │   │   ├── server_ms.py
-  │   │   └── __init__.py
-  │   ├── __init__.py
-  │   ├── dataloader
-  │   │   ├── __init__.py
-  │   │   └── downloads.py
-  │   ├── config.yaml
-  │   ├── configuration.py
-  │   ├── client
-  │   │   ├── utils
-  │   │   │   ├── utils_pt.py
-  │   │   │   ├── utils_ms.py
-  │   │   │   ├── __init__.py
-  │   │   │   └── common_utils.py
-  │   │   ├── __init__.py
-  │   │   ├── client_pt.py
-  │   │   └── client_ms.py
-  │   └── clear_files.py
-  └── bootstrap
-      └── get-pip.py
+├── .gitee
+│   └── images
+│       ├── UI.png
+│       ├── flow shart.png
+│       └── show.gif
+├── chatlaw
+│   ├── client
+│   │   ├── utils
+│   │   │   ├── __init__.py
+│   │   │   └── common_utils.py
+│   │   ├── __init__.py
+│   │   ├── build.py
+│   │   ├── rag.py
+│   │   └── tokenizer.py
+│   ├── dataloader
+│   │   ├── __init__.py
+│   │   └── downloads.py
+│   ├── network
+│   │   ├── __init__.py
+│   │   ├── http_transport.py
+│   │   └── tensor_utils.py
+│   ├── server
+│   │   ├── __init__.py
+│   │   ├── server_ms.py
+│   │   └── server_pt.py
+│   ├── __init__.py
+│   ├── clear_files.py
+│   ├── config.yaml
+│   └── configuration.py
+├── develop
+│   ├── RAG
+│   │   ├── batch_extract_all_laws.py
+│   │   ├── build_vectorstore.py
+│   │   ├── extract_law_pure_regex.py
+│   │   ├── extract_regex_llm_repair.py
+│   │   ├── extract_sliding_window.py
+│   │   ├── law_pdf_to_json.py
+│   │   ├── utils.py
+│   │   └── verify_extraction.py
+│   └── finetune
+│       ├── merge_lora.py
+│       ├── split_dataset.py
+│       └── train_qwen3_finetune.py
+├── docs
+│   └── REPO_STRUCTURE.md
+├── scripts
+│   ├── orangepi
+│   │   ├── 310b
+│   │   │   ├── CANN_installer.sh
+│   │   │   ├── aclinit.json
+│   │   │   ├── mindspore_installer.sh
+│   │   │   └── preparation.sh
+│   │   ├── 310p
+│   │   │   ├── CANN_installer.sh
+│   │   │   ├── mindspore_installer.sh
+│   │   │   └── preparation.sh
+│   │   └── README.md
+│   ├── dhcp_linux_client.sh
+│   ├── dhcp_linux_server.sh
+│   ├── dhcp_mac_client.sh
+│   ├── fake_chatlaw_server.py
+│   ├── pylint_check.sh
+│   ├── static_ip_linux_client.sh
+│   ├── static_ip_mac_client.sh
+│   └── static_ip_server.sh
+├── .gitignore
+├── .gitmodules
+├── .pylint.conf
+├── DEPLOY_SERVER_FEDORA.md
+├── LICENSE
+├── MANIFEST.in
+├── README.md
+├── chatlaw-flutter-client
+├── launcher.py
+├── requirements-server-ms.txt
+├── requirements.txt
+└── setup.py
 ```
+
+各部分职责：
+
+| 路径 | 职责 |
+|---|---|
+| `chatlaw/server/` | 服务端（pt / ms 两条臂线），监听 6005（心跳）与 6006（推理） |
+| `chatlaw/network/` | HTTP 通信层（`http_transport.py`）与张量搬运（`tensor_utils.py`） |
+| `chatlaw/dataloader/` | 从启智社区（OpenI）下载 tokenizer / 模型 / 向量库等资源 |
+| `chatlaw/configuration.py` + `config.yaml` | 合并默认配置与 `config.yaml`，全局单一配置源 |
+| `chatlaw/client/` | **客户端流水线参考实现**：RAG 检索 → prompt 构建 → 分词。是 C++ 重写的规格参照与回归基线，不是可直接运行的客户端 |
+| `chatlaw/client/utils/common_utils.py` | RAG 检索、prompt 模板（`build_prompt`）、LaTeX 渲染等公共工具。**prompt 模板的训练/推理公共契约，改动需重新微调模型** |
+| `chatlaw/clear_files.py` | `chatlaw clear` 的实现，删除 `chatlaw/resources` 下的资源缓存 |
+| `launcher.py` | CLI 入口（`chatlaw` 命令）。同时提供 `get_resources_path()` 等被服务端与离线脚本直接 import 的工具函数 |
+| `develop/` | **离线工具链**：知识库构建与 LoRA 微调，见 [develop/README.md](develop/README.md) |
+| `scripts/` | 组网脚本、昇腾环境脚本、客户端联调仿真服务端 |
+| `docs/` | 仓库结构与清理记录 |
+
+> `chatlaw/resources/`（模型 / tokenizer / 向量库）与 `llm/`、`tokenizer/`、`.openi_home/` 均在 `.gitignore` 中，不入库，由服务端首次启动时自动下载。
+
 ### 2.项目结构图
+
 <p align="center">
   <img src=".gitee/images/flow shart.png" alt="项目工作流程图">
 </p>
 
+整体数据流：客户端（语音 → 降噪 → ParaFormer → RAG 检索 → prompt 拼接 → tokenizer 分词 → 张量）→ 传输 → 服务端（Qwen3-4B 推理 → 张量）→ 传输 → 客户端反序列化 → 流式渲染。
+
+> 图中传输层标注为早期的「TCP 报文段」，当前实现已重构为 **HTTP POST**（`chatlaw/network/http_transport.py`）；分帧格式（8 字节大端长度 + pickle，`<END>` 结束）保持不变，故流程图其余部分仍然准确。
+
 ### 3.主要开发工具
-| 行项 / 技术方向     | 昇腾技术路线         | Pytorch 技术路线   |
-|----------------------|----------------|----------------|
-| **深度学习框架**     | MindSpore      | PyTorch        |
-| **大模型套件**       | MindNLP        | Transformers   |
-| **语音输入模块**     | Paraformer API | Paraformer API |
-| **RAG 模块构建**     | LangChain      | LangChain      |
-| **客户端 UI 构建**   | Gradio         | Gradio         |
+
+| 项 / 技术方向 | 昇腾技术路线 | PyTorch 技术路线 |
+|---|---|---|
+| **深度学习框架** | MindSpore | PyTorch |
+| **大模型套件** | MindNLP | Transformers |
+| **语音输入模块** | Paraformer（`funasr_onnx`） | Paraformer（`funasr_onnx`） |
+| **RAG 模块构建** | LangChain + FAISS | LangChain + FAISS |
+| **客户端** | Flutter（`chatlaw-flutter-client`） | Flutter（`chatlaw-flutter-client`） |
+| **客户端内嵌推理流水线** | 客户端侧 Python（RAG + tokenizer） | 客户端侧 Python（RAG + tokenizer） |
+| **微调** | —（服务端推理，不参与训练） | PEFT / LoRA（`develop/finetune/`） |
 
 ---
 
-## 安装教程
+## 快速开始
 
-### 1.  安装Anaconda3
- **以下两种方法二选一：** 
+### 1.安装
 
-Anaconda3官方下载地址：https://www.anaconda.com/download 根据用户操作系统进行安装
+服务端要求 Linux。Python 版本：PyTorch 路线 3.10–3.12；MindSpore 路线 ≤ 3.11。
 
-清华镜像源下载地址：https://mirrors.tuna.tsinghua.edu.cn/anaconda/archive/ 根据用户操作系统选择合适的版本进行安装
-
-安装完成后，创建Python版本为3.11的conda环境
-
-```
-conda create -n myenv python=3.11  # "myenv"可换成其他名称
-```
-
-### 2. 安装Git
-
- **对于Windows：** 
-
-Git官方下载地址：https://git-scm.com/downloads  选择Windows版进行安装（速度极慢，不推荐）
-
-清华镜像源下载地址：https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/ 选择合适的版本进行安装（速度较快，推荐）
-
- **对于linux**
-
-输入如下命令：
-
-```
-sudo apt update
-sudo apt install git
-```
- **对于Mac** 
-
-输入如下命令
-
-```
-brew -v
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install git
-```
-
-### 3. 安装ChatLaw
-
-输入如下命令：
-
-```
-git clone https://gitee.com/lishangjing2024/ChatLaw.git
+```bash
+git clone https://gitee.com/QingxiBat/ChatLaw.git
 cd ChatLaw
-conda activate myenv  # "myenv"是希望安装本项目的环境
+
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+
+# 服务端（PyTorch 路线）
+pip install -r requirements.txt
+# 或把 CLI 一起装上（提供 `chatlaw` 命令）
 pip install .
+
+# 服务端（MindSpore 路线，需 Python ≤ 3.11）
+pip install -r requirements-server-ms.txt
 ```
 
-以上命令也可简化为：
-```
-conda activate myenv  # "myenv"是希望安装本项目的环境
-pip install git+https://gitee.com/lishangjing2024/ChatLaw.git
-```
+> **完整部署步骤（含 NVIDIA 驱动、C 工具链、OpenI Token、模型解压等踩坑记录）见 [DEPLOY_SERVER_FEDORA.md](DEPLOY_SERVER_FEDORA.md)。首次部署请以该文档为准。**
 
- _注意：本安装方式客户端与服务端通用，但服务端要求有GPU或Ascend（昇腾芯片）后端支持，否则无法正常使用_ 
+### 2.启动服务端
 
----
+```bash
+# PyTorch 路线（推荐）
+python -m chatlaw.server.server_pt
+# 或经 CLI
+chatlaw server pt
 
-## 使用说明
-
-### 1.  检验是否安装成功
-
-命令行输入
-```
-conda activate myenv  # 激活安装本项目的conda环境，若已激活则忽略本命令
-chatlaw -h
+# MindSpore 路线（需 Python ≤ 3.11 + MindSpore 环境）
+python -m chatlaw.server.server_ms
+chatlaw server ms
 ```
 
-若输出
+服务端会按 `chatlaw/config.yaml` 监听：
+
+| 端口 | 用途 | 接口 |
+|---|---|---|
+| `HEARTBEAT_PORT`（默认 6005） | 心跳 / 健康检查 | `POST /health`、`POST /heartbeat` |
+| `DATA_PORT`（默认 6006） | 推理 | `POST /infer` |
+
+首次启动会自动下载 tokenizer 与模型（约 8GB，含自动解压 `llm.zip`），**耗时较长**。
+
+验证服务端已就绪：
+
+```bash
+curl -s -X POST http://127.0.0.1:6005/health -H 'Content-Type: application/json' -d '{"probe":"health"}'
+curl -s -X POST http://127.0.0.1:6005/heartbeat -H 'Content-Type: application/json' -d '{"action":"PING"}'
 ```
-usage: chatlaw [-h] {client,server,clear} ...
+
+### 3.客户端
+
+客户端是独立的 Flutter 工程，以 **git submodule** 形式挂在本仓库下：
+
+```bash
+git submodule update --init --recursive
+```
+
+- 客户端代码与构建说明：见 [`chatlaw-flutter-client`](chatlaw-flutter-client) 目录内的 `README.md`。
+- 客户端需要服务端地址：把服务端的局域网 IP 填入客户端配置（`SERVER_IP`）。
+- 同机 / 真机联调（推荐，免配同网段）：
+
+  ```bash
+  adb reverse tcp:6005 tcp:6005
+  adb reverse tcp:6006 tcp:6006
+  # 然后在客户端里把服务器 IP 填 127.0.0.1
+  ```
+
+- **没有 GPU、只想调客户端**时，可用仓库自带仿真服务端（协议与 `http_transport.py` 完全一致）：
+
+  ```bash
+  python scripts/fake_chatlaw_server.py
+  ```
+
+> 早期的 Gradio 桌面客户端（`chatlaw/client/client_pt.py` / `client_ms.py` / `launcher_gui.py`）已在 2026-09 结构清理中删除，客户端现由 `chatlaw-flutter-client` 统一提供。如需取回旧实现，见 [docs/REPO_STRUCTURE.md](docs/REPO_STRUCTURE.md) §4。
+>
+> `chatlaw/client/` 下的 `rag.py` / `build.py` / `tokenizer.py` 是**客户端流水线的规格参照**（供后续 C++ 重写与回归对比），不是可运行的客户端入口 —— 它们没有 UI，且不连服务端。
+
+### 4.命令行工具
+
+安装后可用 `chatlaw` 命令（等价于 `python launcher.py`）：
+
+```bash
+chatlaw -h              # 查看帮助
+chatlaw server pt       # 启动 PyTorch 路线服务端
+chatlaw server ms       # 启动 MindSpore 路线服务端
+chatlaw clear           # 清理 resources 目录（删除前交互式确认）
+```
+
+`chatlaw -h` 预期输出：
+
+```text
+usage: chatlaw [-h] {server,clear,clear_files} ...
 
 ChatLaw 命令行工具
 
 可用指令包括：
-  chatlaw client <ms|pt> [其他参数]    启动客户端模式
   chatlaw server <ms|pt> [其他参数]    启动服务端模式
-  chatlaw clear                 清理 resources 文件夹
-
-说明：
-  - ms  表示使用MindNLP版本
-  - pt  表示使用Transformers版本
-  - clear 会在删除前执行交互式确认
-
-positional arguments:
-  {client,server,clear}
-
-options:
-  -h, --help            show this help message and exit
-```
-则安装成功
-
-### 2.使用前准备
-_说明：本项目的客户与服务器为一对一关系，组网基于私有地址；以下说明基于私有地址的组网方法，方法不唯一，仅作参考_
-
-#### 2.1 客户端准备
-_注意：本操作会导致以太网无法访问公网，仅能通过WLAN联网，恢复方法已写在在配置方法下方。_
-##### Windows客户端配置静态IP地址
-1. 打开设置
-2. 选择**网络和Internet**
-3. 选择**高级网络设置**
-4. 选择**以太网**
-5. 选择**Internet协议版本4（TCP/IPv4）**
-6. 选择**使用下面的地址**，IP地址设为**192.168.137.101**，子网掩码设置**255.255.255.0**
-
-_恢复方法：把"**使用下面的地址**"改回"**自动获得IP地址**"即可_
-
-##### Linux客户端配置静态IP地址
-运行ChatLaw/scripts目录下的static_ip_linux_client.sh脚本即可
-
-_恢复方法：运行ChatLaw/scripts目录下的dhcp_linux_client.sh脚本即可_
-
-##### Mac客户端配置静态IP地址
-运行ChatLaw/scripts目录下的static_ip_mac_client.sh脚本即可
-
-_恢复方法：运行ChatLaw/scripts目录下的dhcp_mac_client.sh脚本即可，gateway报错不用理会，DHCP协议会自动配置网关_
-
-#### 2.2 服务端准备
-运行ChatLaw/scripts目录下的static_ip_linux_server.sh脚本为服务器配置静态IP。
-
-_注意：配置后服务器将无法通过以太网口访问外网。恢复方法为运行ChatLaw/scripts目录下的dhcp_linux_server.sh脚本即可_
-
-### 3.启动方法
-#### 3.1 客户端启动方法
-命令行输入
-```
-conda activate myenv  # 激活安装本项目的conda环境，若已激活则忽略本命令
-chatlaw client ms  # 启动MindSpore + MindNLP实现模型推理的客户端
-```
-或输入
-```
-conda activate myenv  # 激活安装本项目的conda环境，若已激活则忽略本命令
-chatlaw client pt  # 启动Pytorch + Transformers实现模型推理的客户端
-```
-等待片刻后，若浏览器显示如下界面：
-<p align="center">
-  <img src=".gitee/images/UI.png" alt="UI样式">
-</p>
-
-则客户端启动成功
-
- _注意：本模块初次启动需要下载知识库和语音模型文件，故初次启动较慢_ 
-
-#### 3.2 服务端启动方法
-命令行输入
-```
-conda activate myenv  # 激活安装本项目的conda环境，若已激活则忽略本命令
-chatlaw server ms  # 服务端使用MindSpore + MindNLP实现模型推理
-```
-或输入
-```
-conda activate myenv  # 激活安装本项目的conda环境，若已激活则忽略本命令
-chatlaw server pt  # 服务端使用Pytorch + Transformers实现模型推理
-```
-若命令行输出
+  chatlaw clear                 清理 resources 文件夹（等价于 chatlaw clear_files）
 ```
 
-```
-则服务端启动成功
+### 5.数据清理与卸载
 
- _注意：本模块初次启动需要下载知识库和语音模型文件，故初次启动较慢_ 
+```bash
+# 清理已下载的模型 / tokenizer / 向量库（删除前会确认）
+chatlaw clear
+chatlaw clear_files     # 等价写法
 
-### 4.使用演示
+# 卸载
+pip uninstall chatlaw
+```
 
-UI中可选择输入文本和语音(不可同时输入)，按下**🚀发送到服务器**，若状态栏无异常，输出区域有文本流式输入，则运行成功。此处演示(已加速)以文本输入为例：
-<p align="center">
-  <img src=".gitee/images/show.gif" alt="使用演示">
-</p>
+_注意：卸载不会删除已下载的模型文件，请先执行清理命令。_
 
-### 5.数据清除
-命令行输入
-```
-conda activate myenv  # 激活安装本项目的conda环境，若已激活则忽略本命令
-chawlaw clear_files  # 清除所有模型文件数据
-```
-___
-## 卸载方法
-命令行输入
-```
-conda activate myenv  # 激活安装本项目的conda环境，若已激活则忽略本命令
-pip uninstall chatlaw  # 卸载ChatLaw
-```
-_注意：上述命令不会将已下载的模型等文件一并删除，因此在卸载前请执行清除数据命令_
+---
 
+## 离线工具链（develop）
+
+`develop/` 是**离线工具链**，与线上推理链路解耦，包含两块能力：
+
+| 目录 | 能力 |
+|---|---|
+| `develop/RAG/` | 从自有法律 PDF 构建知识库（抽取 → 校验 → 建 FAISS 向量库） |
+| `develop/finetune/` | LoRA 微调（切分数据集 → 训练 → 合并导出为完整模型） |
+
+> ⚠️ **不可再生**：向量库虽然可以从启智社区（OpenI）的 `enter/vectorstore` 重新下载，但**「用自有 PDF 建库」与「LoRA 重训」这两项能力只存在于 `develop/`**。删掉这棵子树就无法复现当前的模型与知识库。逐脚本说明见 [develop/README.md](develop/README.md)。
+
+微调链路的 prompt 模板单一真相源是 `chatlaw/client/utils/common_utils.py` 的 `build_prompt`，训练脚本直接复用；**改动模板必须重新微调**（详见 [DEPLOY_SERVER_FEDORA.md](DEPLOY_SERVER_FEDORA.md) §12）。
+
+---
+
+## 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| [DEPLOY_SERVER_FEDORA.md](DEPLOY_SERVER_FEDORA.md) | **服务端部署指南**（Fedora + NVIDIA GPU，含全部踩坑与 FAQ） |
+| [docs/REPO_STRUCTURE.md](docs/REPO_STRUCTURE.md) | 仓库结构清单（运行时必需 / 移植参照 / 已删项）、已删项恢复方法、历史留档 |
+| [develop/README.md](develop/README.md) | 离线工具链逐脚本说明与已知坑 |
+| [scripts/orangepi/README.md](scripts/orangepi/README.md) | 昇腾 310p / 310b 环境安装 |
+| [`chatlaw-flutter-client`](chatlaw-flutter-client) | 客户端（Android 构建、内嵌 Python 流水线、协议实现） |
+
+---
 
 ## 参与贡献
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
+1. Fork 本仓库
+2. 新建 `Feat_xxx` 分支
+3. 提交代码
+4. 新建 Pull Request
 
 ---
 
@@ -358,5 +352,15 @@ _注意：上述命令不会将已下载的模型等文件一并删除，因此�
 
 联系邮箱: 1755397894@qq.com
 
-启智社区个人主页：https://openi.pcl.ac.cn/enter (本项目所用数据集和模型均托管于此)
+启智社区个人主页：https://openi.pcl.ac.cn/enter （本项目所用数据集和模型均托管于此）
 
+### 历史存档
+
+以下两张图是**已删除的 Gradio 桌面客户端**的界面与使用演示，仅作历史留档：
+
+<p align="center">
+  <img src=".gitee/images/UI.png" alt="旧 Gradio 客户端界面（已废弃）" width="640">
+</p>
+<p align="center">
+  <img src=".gitee/images/show.gif" alt="旧 Gradio 客户端使用演示（已废弃）" width="640">
+</p>
