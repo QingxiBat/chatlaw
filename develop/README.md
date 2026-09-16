@@ -17,7 +17,7 @@
 ## 0. 运行前提
 
 - **所有脚本都必须在仓库根目录（`ChatLaw/`）下执行**。多个脚本的输入/输出路径是**相对当前工作目录**的（例如 `develop/resources/finetuning_dataset/dataset.json`），换目录执行会读不到文件或把产物写错地方。
-- 依赖：`pip install -r requirements.txt`（含 `pymupdf` / `tqdm` / `matplotlib` / `peft` / `bitsandbytes` / `onnxruntime` 等 develop 段依赖）。
+- 依赖：`pip install -r requirements.txt`（含 `pymupdf` / `tqdm` / `peft` / `bitsandbytes` / `onnxruntime` 等 develop 段依赖）。
 - 建库与微调都需要能加载 Qwen 模型的机器（GPU 强烈建议；CPU 可跑但极慢）。
 - 模型/tokenizer 需已就绪：`chatlaw/resources/llm`、`chatlaw/resources/tokenizer`（服务端首次启动会自动下载，见 [DEPLOY_SERVER_FEDORA.md](../DEPLOY_SERVER_FEDORA.md) §6）。
 

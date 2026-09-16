@@ -7,6 +7,7 @@
 >   逐行等价的实现取代），并补齐此前缺失的 ONNX 嵌入模型导出脚本。
 > - **第三轮（§9）**：删除 `chatlaw/client/` 整目录 —— 把唯一还活着的 prompt 契约
 >   提到 `chatlaw/prompt.py`，其余死代码一并删除。
+> - **第四轮（§10）**：清理 `requirements.txt` 里零引用的依赖。
 >
 > 冻结点：tag `pre-cleanup-2026-09`（Feat_app @ `774bcf9`）。
 > 原则：**只清理已失效的客户端代码，不动任何服务端 / 协议 / 算法 / prompt 公共契约**。
@@ -94,13 +95,26 @@
 | `markdown` | **第一轮保留、第二轮删** | 第一轮它被保留下来的 `rag.py:18` 顶层 import；第二轮 `rag.py` 也删了，全仓不再有任何引用 |
 | `latex2mathml` | **第三轮删** | 只被 `common_utils.render_mathml_from_latex` 使用（`latex2mathml.converter`）。该函数第二轮后已无调用方，第三轮随 `chatlaw/client/` 一并删除 |
 | `funasr_onnx`、`soundfile`、`librosa` | **第三轮删** | 只被 `common_utils.speech_to_text` 使用。Flutter 端 `python/asr.py` 已改用标准库 `wave` + 纯 numpy 重采样，其自己的 `python/requirements.txt` 注明「桌面端需要时手动安装」 |
-| `langchain*`、`faiss-cpu`、`sentence-transformers` | **保留** | 被 `develop/RAG/utils.py:6-8` 顶层 import（离线建库），`sentence-transformers` 另被 `export_embedding_onnx.py` 用于数值校验 |
+| `langchain-community`、`langchain-huggingface` | **保留** | 被 `develop/RAG/utils.py:7-8` 顶层 import（离线建库）。注：`langchain_core` 虽被 `utils.py:6` 直接 import，但由这两个包传递依赖带入，故未单独声明 |
+| `faiss-cpu`、`sentence-transformers` | **保留** | `faiss-cpu` 经 `langchain_community.vectorstores.FAISS` 使用；`sentence-transformers` 被 `export_embedding_onnx.py` 用于数值校验，也是 `HuggingFaceEmbeddings` 的底层依赖 |
 | `onnxruntime` | **第二轮新增** | `develop/RAG/export_embedding_onnx.py` 用于导出后的数值一致性校验与 ONNX 侧推理。放在 develop 段，服务端与训练都不需要 |
-| `pyyaml`、`accelerate`、`jieba` | **保留（未动）** | 排查时易被误判为无用，实际：`pyyaml` 的模块名是 `yaml`（`chatlaw/configuration.py:6`）；`accelerate` 无显式 import，但 `server_pt.py` 的 `device_map="auto"` 在运行时需要它；`jieba` 全仓无引用，属**早已存在的孤儿**，本轮未动（要清理可单独提） |
+| `accelerate`、`bitsandbytes` | **保留** | 两者都**没有直接 import**，极易被误删：`accelerate` 在传入 `device_map` 时由 `transformers/modeling_utils.py:4155` 的 `accelerate_dispatch()` 使用（`server_pt.py:95` 传了 `device_map="auto"`）；`bitsandbytes` 被 `develop/RAG/extract_regex_llm_repair.py:88-90` 的 `BitsAndBytesConfig(load_in_4bit=True)` 使用（代码 import 的是 `transformers.BitsAndBytesConfig`，不是 `bitsandbytes` 本身） |
+| `jieba`、`langchain`（元包）、`matplotlib` | **第四轮删** | `jieba` 全仓零引用（`bbff15f` 语音输入时代遗留）；`langchain` 元包零引用，且 `langchain-community` / `langchain-huggingface` 的 `Requires-Dist` 只要求 `langchain-core` / `langchain-classic`，环境里没有任何第三方包硬依赖这个元包（唯一声明依赖它的是本项目自己的 `chatlaw-0.1.0`）；`matplotlib` 随 `4da2d07` 的 LawBench 测试代码加入，而该测试代码已不在仓库里，全仓零引用 |
+| `pyyaml` | **保留** | 模块名是 `yaml`（`chatlaw/configuration.py:6`、`chatlaw/dataloader/downloads.py:24`） |
 
 > ⚠️ 勘误记录（第一轮）：任务书原稿称「`render_mathml_from_latex` 已无调用方」。当时实测 `chatlaw/client/rag.py:147` 仍在调用它，故 `latex2mathml` 必须保留；第三轮 `rag.py` 与 `common_utils.py` 均已删除，依赖随之移除。
 >
-> ⚠️ 排查依赖时的坑：**PyPI 包名 ≠ 模块名**。`pyyaml`→`yaml`、`faiss-cpu`→ 经 langchain 使用、`accelerate`→ 无 import 但 `device_map="auto"` 需要。按包名 grep 会得到四个假阴性，直接删会打断已跑通的服务端。
+> ⚠️ 排查依赖时的坑：**PyPI 包名 ≠ 模块名，导入符号也可能 ≠ 包名**。按包名 grep 会得到一批假阴性，直接删会打断已跑通的服务端或建库链路：
+>
+> | 包 | 为什么 grep 不到 |
+> |---|---|
+> | `pyyaml` | 模块名是 `yaml` |
+> | `accelerate` | 无任何 import，由 transformers 在 `device_map` 分支内部调用 |
+> | `bitsandbytes` | 代码 import 的是 `transformers.BitsAndBytesConfig` |
+> | `faiss-cpu` | 只经 `langchain_community.vectorstores.FAISS` 间接使用 |
+> | `sentence-transformers` | 由 `HuggingFaceEmbeddings` 间接使用 |
+>
+> 反面教训：第四轮初筛时把 `accelerate` 和 `bitsandbytes` 都判成了「无引用」，逐一核查后才纠正 —— 这两个是本文件里最容易被误删的两个。
 
 ### 3.2 `launcher.py` 的同步修改
 
@@ -363,8 +377,8 @@ Flutter 的 ONNX 路径才是更可移植的参照 —— 它完全不依赖 Pyt
    - `accelerate` 没有任何显式 import，但 `server_pt.py` 的 `device_map="auto"` 在运行时需要它；
    - `faiss-cpu` 只通过 `langchain_community.vectorstores.FAISS` 间接使用。
    这三个**必须保留**——照「grep 不到就删」处理会打断已跑通的服务端部署。
-2. `jieba` 全仓无任何引用，但**这是早已存在的孤儿**，不是本轮删除造成的，故本轮未动；
-   要清理可单独提一个提交。
+2. `jieba` 当时查明全仓无任何引用，但属**早已存在的孤儿**（非第三轮删除造成），故第三轮未动。
+   **第四轮已删除**，见 §10。
 
 ### 9.5 关于目录名与客户端位置的说明
 
@@ -377,3 +391,44 @@ Flutter 的 ONNX 路径才是更可移植的参照 —— 它完全不依赖 Pyt
   - 外层仓库**无法跟踪子模块目录内的文件**：`git add chatlaw-flutter-client/x` 会直接报
     `fatal: Pathspec ... is in submodule`，外层只会一直显示 gitlink 变脏。
   - 因此「把外层文件合并进子模块目录」这条路必须先把 submodule 取消掉才可行。
+
+---
+
+## 10. 第四轮：清理 `requirements.txt` 里零引用的依赖
+
+### 10.1 删除项与依据
+
+| 依赖 | 为什么可删 |
+|---|---|
+| `jieba` | 全仓（`chatlaw/` `develop/` `scripts/` `launcher.py`）零引用；`git log -S` 显示它随 `bbff15f`「加入语音输入API」进来，属旧客户端/ASR 时代遗留。子模块自己的 `python/requirements.txt` 也未使用 |
+| `langchain`（元包） | 全仓零引用。保留代码用的是 `langchain_community` / `langchain_huggingface` / `langchain_core` 三个子包，而这个元包只是把它们打包在一起的便利包。逐个体检环境里所有 `*.dist-info` 的 `Requires-Dist`，**没有任何第三方包硬依赖它**（唯一声明依赖它的是本项目自己的 `chatlaw-0.1.0`，即 `setup.py` 读的这份 requirements） |
+| `matplotlib` | 全仓零引用；随 `4da2d07`「重构requirements，添加lawbench测试代码」加入，而 **LawBench 测试代码已不在仓库里**，依赖留下成了孤儿 |
+
+### 10.2 险些误删的两个（务必记住）
+
+初筛「按包名 grep」时，`accelerate` 与 `bitsandbytes` 都被判成「无引用」。逐一核查后**两个都必须保留**：
+
+| 包 | 初筛为何漏掉 | 真实使用者 |
+|---|---|---|
+| `accelerate` | 全仓无任何 import | `transformers/modeling_utils.py:4155` 的 `accelerate_dispatch()` —— 只在传入 `device_map` 时走这条分支，而 `chatlaw/server/server_pt.py:95` 传了 `device_map="auto"`。删了它，服务端加载模型就会失败 |
+| `bitsandbytes` | 代码 import 的是 `transformers.BitsAndBytesConfig`，不是 `bitsandbytes` | `develop/RAG/extract_regex_llm_repair.py:88-90` 的 `BitsAndBytesConfig(load_in_4bit=True)`，即「正则切分 + LLM 结构化清洗」抽取方案依赖的 4bit 量化加载 |
+
+由此在 §3.1 补了一张「为什么 grep 不到」的表（`pyyaml` / `accelerate` / `bitsandbytes` / `faiss-cpu` / `sentence-transformers`）。**结论：这个仓库的依赖不能靠 grep 包名来判断死活。**
+
+### 10.3 「直接 import 但未显式声明」的包：全部经传递依赖保证，未改动
+
+静态比对「保留代码的顶层 import」与「`requirements.txt` 声明」，发现 5 个直接 import
+但未显式声明的包。逐一核查后**确认它们都由已声明的包硬性传递带入**，故本轮按「只删不加」
+的范围未动（严格说「直接 import 的就该直接声明」，但这属风格问题，且本轮不扩大改动面）：
+
+| 未声明的直接 import | 由谁保证 |
+|---|---|
+| `langchain_core`（`develop/RAG/utils.py:6`） | `langchain-community` 的 `Requires-Dist: langchain-core>=1.0.1` |
+| `datasets`（`develop/finetune/train_qwen3_finetune.py:30`） | `transformers` / `peft` / `accelerate` / `sentence-transformers` **四个**已声明包都 `Requires-Dist: datasets` |
+| `numpy`（`chatlaw/server/server_ms.py:7`、`chatlaw/network/tensor_utils.py:18`、`export_embedding_onnx.py:283`） | `torch` / `transformers` 的硬依赖 |
+| `mindspore`（`server_ms.py`） | `mindnlp` 固定依赖（`mindspore<=2.7.0,>=2.5.0`），而 `mindnlp` 已声明 |
+| `torch_npu`（`server_pt.py` 昇腾分支） | 昇腾专用包，从华为的 index 安装，**无法**用 PyPI 依赖表达；属部署环境前置条件，见 `scripts/orangepi/` |
+
+> 排查过程记录：`datasets` 一度被怀疑是「训练链路在新环境跑不起来」的缺口，核查
+> `Requires-Dist` 后确认 `transformers` 等多个已声明包都会把它带进来，**不是缺口**。
+> 这印证了 §10.2 的结论：这个仓库的依赖判断必须查 `Requires-Dist`，靠 grep 源码不够。

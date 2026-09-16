@@ -1,10 +1,9 @@
 accelerate
 transformers
-jieba
 torch>=2.9.0
 pyyaml
 openi
-langchain
+# 下面四个只被 develop/ 的离线建库与导出链路使用，服务端推理不需要它们：
 langchain-community
 langchain-huggingface
 faiss-cpu
@@ -19,8 +18,9 @@ sentence-transformers
 mindnlp>=0.5.1; platform_system == "Linux" and python_version < "3.12"
 
 # develop / optional tooling
-matplotlib
 pymupdf
+# bitsandbytes 供 develop/RAG/extract_regex_llm_repair.py 的 4bit 量化加载使用
+# （代码里 import 的是 transformers.BitsAndBytesConfig，不是 bitsandbytes 本身）
 bitsandbytes; platform_system != "Windows" and python_version < "3.13"
 tqdm
 
