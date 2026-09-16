@@ -46,7 +46,7 @@ if __package__ in (None, ""):
 import torch  # pylint: disable=wrong-import-position
 from transformers import AutoModelForCausalLM, AutoTokenizer  # pylint: disable=wrong-import-position
 
-from chatlaw.client.utils.common_utils import build_prompt as build_client_prompt  # pylint: disable=wrong-import-position
+from chatlaw.prompt import build_prompt as build_client_prompt  # pylint: disable=wrong-import-position
 from chatlaw.dataloader import download_resources  # pylint: disable=wrong-import-position
 from chatlaw.dataloader.downloads import (  # pylint: disable=wrong-import-position
     LLM_LOCAL_MARKER,

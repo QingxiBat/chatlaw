@@ -37,9 +37,9 @@ from transformers import (  # pylint: disable=wrong-import-position
 )
 from peft import LoraConfig, TaskType, get_peft_model  # pylint: disable=wrong-import-position
 
-# 训练与推理共用同一份 prompt 模板：这里复用桌面客户端的实现，
-# 避免两边各写一份文案导致分布漂移（客户端模板改了就必须重新训练）。
-from chatlaw.client.utils.common_utils import build_prompt as build_client_prompt  # pylint: disable=wrong-import-position
+# 训练与推理共用同一份 prompt 模板：这里复用 chatlaw/prompt.py 的实现，
+# 避免两边各写一份文案导致分布漂移（模板改了就必须重新训练）。
+from chatlaw.prompt import build_prompt as build_client_prompt  # pylint: disable=wrong-import-position
 from chatlaw.dataloader import download_resources  # pylint: disable=wrong-import-position
 from launcher import get_resources_path  # pylint: disable=wrong-import-position
 

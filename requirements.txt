@@ -3,11 +3,7 @@ transformers
 jieba
 torch>=2.9.0
 pyyaml
-latex2mathml
 openi
-funasr_onnx
-soundfile
-librosa
 langchain
 langchain-community
 langchain-huggingface
