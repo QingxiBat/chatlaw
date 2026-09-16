@@ -1,8 +1,13 @@
 # ChatLaw 仓库结构清理清单（Feat_app 分支）
 
-> 本文档是 **2026-09 仓库结构清理与文档校准** 的执行依据与留档。
+> 本文档是 **2026-09 仓库结构清理与文档校准** 的执行依据与留档，覆盖两轮：
+>
+> - **第一轮（§1–§7）**：删除已废弃的 Gradio 桌面客户端与桌面包壳，重写 README。
+> - **第二轮（§8）**：删除 `chatlaw/client/` 三层流水线（已无调用方，被 Flutter 端
+>   逐行等价的实现取代），并补齐此前缺失的 ONNX 嵌入模型导出脚本。
+>
 > 冻结点：tag `pre-cleanup-2026-09`（Feat_app @ `774bcf9`）。
-> 原则：**只清理已失效的旧客户端与启动器，不动任何服务端 / 协议 / 算法 / 保留客户端流水线**。
+> 原则：**只清理已失效的客户端代码，不动任何服务端 / 协议 / 算法 / prompt 公共契约**。
 
 ---
 
@@ -14,9 +19,12 @@
 | 服务端（ms 臂线） | `chatlaw/server/server_ms.py` | 保留（MindSpore/昇腾，需 Python ≤ 3.11） |
 | 通信层 | `chatlaw/network/http_transport.py` | 已从裸 socket 重构为 **HTTP POST** |
 | 客户端（当前） | `chatlaw-flutter-client`（git submodule） | **真机验证通过**，Android 内嵌 Python 跑完整流水线 |
-| 客户端（旧） | `chatlaw/client/client_{pt,ms}.py` + Gradio UI | **已废弃**，本轮删除 |
-| 离线工具链 | `develop/`（RAG 建库 + LoRA 微调） | 保留，**能力不可再生** |
-| 后续方向 | C++ 重写算法 + Qt 前端 | 本轮**不**引入任何 C++/Qt 代码 |
+| 客户端（旧，第一轮删除） | `chatlaw/client/client_{pt,ms}.py` + Gradio UI | 已删除 |
+| 客户端流水线（旧，第二轮删除） | `chatlaw/client/{rag,build,tokenizer}.py` | 已删除；实现在 Flutter 端 |
+| 客户端流水线（当前） | `chatlaw-flutter-client/python/{rag,build,tokenize,asr}.py` | **唯一在跑的实现** |
+| prompt 公共契约（保留） | `chatlaw/client/utils/common_utils.py` 的 `build_prompt` | **活的**：`develop/finetune/` 直接调用 |
+| 离线工具链 | `develop/`（RAG 建库 + ONNX 导出 + LoRA 微调） | 保留，**能力不可再生** |
+| 后续方向 | C++ 重写算法 + Qt 前端 | 不引入任何 C++/Qt 代码 |
 
 旧的 Gradio 桌面客户端（`client_pt.py` / `client_ms.py` / `launcher_gui.py`）只服务「PC 上打开浏览器页面联调」这一历史场景；Flutter 客户端已真机验证，且 Gradio 客户端不覆盖 Android，**保留它只会让新接入者误以为它是正式客户端**。这是本轮删除的唯一动机。
 
@@ -28,10 +36,10 @@
 |---|---|
 | `chatlaw/server/**` | `setup.py` `find_packages(include=["chatlaw","chatlaw.*"])`；部署入口 `python -m chatlaw.server.server_pt`。`server_pt.py:24` / `server_ms.py:20` 分别 import `launcher.get_resources_path` 与 `chatlaw.network.http_transport` |
 | `chatlaw/network/**` | `server_pt.py:17`、`server_ms.py:20`（`http_transport`）、`server_pt.py:23`（`tensor_utils.to_device_tensors`）、`chatlaw/client/utils/common_utils.py:7` |
-| `chatlaw/dataloader/**` | `server_pt.py:16`、`server_ms.py:19`、`chatlaw/client/{rag.py:23, tokenizer.py:17}`、`chatlaw/clear_files.py:14`、`develop/finetune/train_qwen3_finetune.py:43`、`merge_lora.py:50-51` |
+| `chatlaw/dataloader/**` | `server_pt.py:16`、`server_ms.py:19`、`chatlaw/clear_files.py:14`、`develop/finetune/train_qwen3_finetune.py:43`、`merge_lora.py:50-51`（第二轮前还有已删的 `chatlaw/client/{rag.py:23, tokenizer.py:17}`） |
 | `chatlaw/configuration.py` | `server_pt.py:15`、`server_ms.py:18`；自身 `:7` 依赖 `launcher.get_project_root` |
 | `chatlaw/config.yaml` | `configuration.py:9` 拼 `get_project_root()/config.yaml` 读取；含 `SERVER_IP` / `HEARTBEAT_PORT` / `DATA_PORT` / `INFER_PATH` |
-| `launcher.py` | **运行时依赖，不是启动器**。被 `chatlaw/server/server_pt.py:24`、`chatlaw/configuration.py:7`、`chatlaw/dataloader/downloads.py:6`、`chatlaw/client/{rag.py:24, build.py, tokenizer.py:18}`、`chatlaw/client/utils/common_utils.py:6`、`develop/RAG/*`、`develop/finetune/*` 直接 import。**绝不能整文件删除**，本轮只摘掉其中指向已删客户端的 `client` 子命令 |
+| `launcher.py` | **运行时依赖，不是启动器**。被 `chatlaw/server/server_pt.py:24`、`chatlaw/configuration.py:7`、`chatlaw/dataloader/downloads.py:6`、`chatlaw/client/utils/common_utils.py:6`、`develop/RAG/*`、`develop/RAG/export_embedding_onnx.py`、`develop/finetune/*` 直接 import。**绝不能整文件删除**，第二轮只摘掉其中指向已删客户端的 `client` 子命令 |
 | `setup.py` | 打包入口，`entry_points` 指向 `launcher:main`，`py_modules=["launcher"]` |
 | `requirements.txt` | 服务端（pt 臂线）+ develop 工具链依赖 |
 | `requirements-server-ms.txt` | ms 臂线依赖说明（mindnlp 需 Python ≤ 3.11） |
@@ -44,9 +52,9 @@
 
 | 路径 | 为什么必须留 |
 |---|---|
-| `chatlaw/client/{rag,build,tokenizer}.py` + `chatlaw/client/__init__.py` | 最新重构（已合并 PR !3），是 **C++ 移植的规格参照与回归基线**。`build.py` / `tokenizer.py` 复用 `rag.py`，`rag.py` 复用 `common_utils.py` |
-| `chatlaw/client/utils/common_utils.py` | **训练与推理的公共契约**。`build_prompt`（`:516`）被 `develop/finetune/train_qwen3_finetune.py:42`、`merge_lora.py:49` 直接 import；同时 `rag.py` 依赖其 `load_vectorstore(:286)` / `load_exact_index(:331)` / `build_law_name_candidates(:354)` / `retrieve_laws(:443)` / `render_mathml_from_latex(:35)`。**内容一字不改** |
-| `develop/**` | 知识库重建与 LoRA 微调的**唯一**入口，见 `develop/README.md` |
+| `chatlaw/client/utils/common_utils.py` | **`build_prompt` 与 `_format_doc_block` 是训练与推理的 prompt 公共契约**，被 `develop/finetune/train_qwen3_finetune.py`、`merge_lora.py` 直接 import 并调用。**这两个函数一字不改**；文件内其余部分（RAG 检索 / ASR / MathML / 遗留 socket 工具）已无调用方，第二轮只加了文件顶部 docstring 标注，未动任何代码 |
+| `chatlaw/client/__init__.py` | 包标记 + 说明为何本包只剩 `utils/common_utils.py`（第二轮重写；原惰性 import 已删，因为它指向的 `build.py` / `rag.py` / `tokenizer.py` 不存在了） |
+| `develop/**` | 知识库重建、ONNX 嵌入导出与 LoRA 微调的**唯一**入口，见 `develop/README.md` |
 | `scripts/orangepi/**` | 昇腾 310p/310b 环境安装脚本，ms 臂线部署依赖 |
 | `scripts/fake_chatlaw_server.py` | 客户端联调桩（实现与 `http_transport.py` 一致的 6005/6006 HTTP 协议，配合 `adb reverse` 使用） |
 | `scripts/static_ip_*.sh`、`scripts/dhcp_*.sh`（6 个） | 私有地址一对一联网组网脚本，README「使用前准备」章节的落地脚本 |
@@ -80,13 +88,15 @@
 
 | 依赖 | 处理 | 依据 |
 |---|---|---|
-| `gradio==5.49.1` | **删** | 全仓仅 `client_pt.py:4` / `client_ms.py:4` 使用 |
-| `pyside6` | **删** | 全仓仅 `launcher_gui.py:6` 使用 |
-| `markdown` | **保留** | `chatlaw/client/rag.py:18` 顶层 import（保留文件） |
-| `latex2mathml` | **保留** | `common_utils.py:64` 使用于 `render_mathml_from_latex`，而该函数被**保留文件** `rag.py:147` 调用 |
-| `funasr_onnx`、`soundfile`、`librosa` | **保留** | `common_utils.py:147-149`（`speech_to_text`）引用 |
+| `gradio==5.49.1` | **第一轮删** | 全仓仅 `client_pt.py:4` / `client_ms.py:4` 使用 |
+| `pyside6` | **第一轮删** | 全仓仅 `launcher_gui.py:6` 使用 |
+| `markdown` | **第一轮保留、第二轮删** | 第一轮它被保留下来的 `rag.py:18` 顶层 import；第二轮 `rag.py` 也删了，全仓不再有任何引用 |
+| `latex2mathml` | **保留** | `common_utils.py:64` 使用于 `render_mathml_from_latex`。该函数第二轮后已无调用方，但 `common_utils.py` 按约定不动代码，故依赖一并保留 |
+| `funasr_onnx`、`soundfile`、`librosa` | **保留** | `common_utils.py` 的 `speech_to_text` 引用（该函数第二轮后亦无调用方，理由同上） |
+| `langchain*`、`faiss-cpu`、`sentence-transformers` | **保留** | 被 `develop/RAG/utils.py:6-8` 顶层 import（离线建库与导出必需）。它们同时也是 `common_utils` RAG 半的依赖，但**决定性理由是 develop** |
+| `onnxruntime` | **第二轮新增** | `develop/RAG/export_embedding_onnx.py` 用于导出后的数值一致性校验与 ONNX 侧推理。放在 develop 段，服务端与训练都不需要 |
 
-> ⚠️ 勘误记录：任务书原稿称「`render_mathml_from_latex` 已无调用方」。实测 `chatlaw/client/rag.py:147` 仍在调用它，故 `latex2mathml` **必须保留**。只有 `speech_to_text` 在删除旧 Gradio 客户端后确实失去了调用方，属可后续单独清理项（本轮不动 `common_utils.py` 内容）。
+> ⚠️ 勘误记录（第一轮）：任务书原稿称「`render_mathml_from_latex` 已无调用方」。当时实测 `chatlaw/client/rag.py:147` 仍在调用它，故 `latex2mathml` 必须保留；两轮之后 `rag.py` 已删，该函数确实失去调用方，但 `common_utils.py` 的代码按约定不动，依赖随之保留。
 
 ### 3.2 `launcher.py` 的同步修改
 
@@ -138,15 +148,21 @@ git checkout <该提交>^ -- docs/client_functions.md
 2. `requirements.txt` 加回 `gradio` / `pyside6`；
 3. 恢复 `run.bat` / `run.sh` / `bootstrap/get-pip.py`（如果还要 Windows 免安装包）。
 
+若将来需要回退第二轮的 `chatlaw/client/` 三层流水线：
+1. `git checkout 0e022a0 -- chatlaw/client/`（`0e022a0` 是第一轮 `.gitignore` 提交，其中 `rag.py` / `build.py` / `tokenizer.py` 尚在）；
+2. `chatlaw/client/__init__.py` 一并恢复（第二轮把它重写成了纯说明文件）；
+3. `requirements.txt` 加回 `markdown`；
+4. 注意：即便回退，它们**依然没有任何调用方** —— 回退只是为了让代码可读，不会让它重新参与运行。
+
 ---
 
 ## 5. 已知坑与遗留项
 
 1. **`develop/RAG/law_pdf_to_json.py:9` 残留他人机器的绝对路径** —— 默认路径写死在原作者机器上，直接跑会失败，需显式传参或改常量。
 2. **`develop/RAG/law_pdf_to_json.py` 的默认 `OUTPUT_DIR` 与 `build_vectorstore.py:7` 的读取路径不一致** —— 建库链路需要人工把产物挪到 `build_vectorstore.py` 期望的位置，否则「建库成功但检索为空」。
-3. **`chatlaw/client/rag.py:144` 的 docstring 仍写 "for the Gradio panel"** —— 措辞过期（Gradio 客户端已删）。`rag.py` 是移植参照，本轮**按约束不动**；后续 C++ 移植时顺手改文案即可，不影响行为。
-4. **`common_utils.speech_to_text` / `funasr_onnx` / `soundfile` / `librosa`** —— 删掉旧 Gradio 客户端后失去调用方。Flutter 端的 ASR 在 `chatlaw-flutter-client/python/asr.py` 内有自己的实现。属可清理项，但本轮不动 `common_utils.py`。
-5. **子模块 `chatlaw-flutter-client/docs/client_functions.md`** —— 错位且过期：全篇引用外层 `chatlaw/**` 路径（`client_pt.py:35` / `client_ms.py:65` 等），描述的 `format_retrieved_docs_html` 已不存在，行号滞后 2~12 行。**已按用户确认删除**：在子模块内单独提交（`docs: 删除错位过期的 client_functions.md`），随后在外层 bump submodule 指针。同目录 `docs/client_modules.md` 描述的是子模块自身的 `python/**` 模块，内容准确，**保留**。
+3. **`common_utils.speech_to_text` / `render_mathml_from_latex` / RAG 检索半 / 遗留 socket 工具** —— 已全部无调用方（`render_mathml_from_latex` 随第二轮删除 `rag.py` 失去最后的调用方）。Flutter 端在 `chatlaw-flutter-client/python/` 内有自己的实现。**按约定保留**，`common_utils.py` 只在文件顶部加了 docstring 说明，代码一字未动。
+4. **子模块 `chatlaw-flutter-client/docs/client_functions.md`** —— 错位且过期：全篇引用外层 `chatlaw/**` 路径（`client_pt.py:35` / `client_ms.py:65` 等），描述的 `format_retrieved_docs_html` 已不存在，行号滞后 2~12 行。**已按用户确认删除**：在子模块内单独提交（`docs: 删除错位过期的 client_functions.md`），随后在外层 bump submodule 指针。同目录 `docs/client_modules.md` 描述的是子模块自身的 `python/**` 模块，内容准确，**保留**。
+5. **ONNX 导出脚本的默认路径** —— `export_embedding_onnx.py` 的默认模型目录来自 `launcher.get_resources_path()`，因此要在**仓库根目录**执行；模型放在别处需显式传位置参数。
 
 ---
 
@@ -175,17 +191,108 @@ python -c "import launcher, chatlaw.configuration, chatlaw.dataloader, chatlaw.n
 # 2) CLI 应只列 server / clear / clear_files
 python launcher.py --help
 
-# 3) 客户端流水线（B 类，需 markdown 等第三方依赖）
-python -c "import chatlaw.client.rag, chatlaw.client.build, chatlaw.client.tokenizer"
+# 3) chatlaw.client 包仍可导入（第二轮后只剩 common_utils，不需要任何第三方依赖）
+python -c "import chatlaw.client, chatlaw.client.utils.common_utils; print('ok')"
 
 # 4) 微调链路未断：模板单一真相源
 grep -n "def build_prompt" chatlaw/client/utils/common_utils.py
-grep -n "build_prompt\|common_utils" develop/finetune/train_qwen3_finetune.py develop/finetune/merge_lora.py
+grep -n "common_utils" develop/finetune/train_qwen3_finetune.py develop/finetune/merge_lora.py
 
 # 5) 悬空引用检查（应无输出）
-grep -rn "client_pt\|client_ms\|utils_pt\|utils_ms\|launcher_gui\|try_rag\|push_to_all_repositories\|get-pip" . \
+grep -rn "client_pt\|client_ms\|utils_pt\|utils_ms\|launcher_gui\|try_rag\|push_to_all_repositories\|get-pip\|chatlaw.client.rag\|chatlaw.client.build\|chatlaw.client.tokenizer" . \
   --exclude-dir=.git --exclude-dir=.zcode | grep -v "^./chatlaw-flutter-client/docs/"
 
-# 6) Flutter 侧未受影响（在子模块内执行，不构建 APK）
+# 6) ONNX 导出脚本可用（需要 torch/transformers/onnxruntime）
+python develop/RAG/export_embedding_onnx.py --help
+
+# 7) Flutter 侧未受影响（在子模块内执行，不构建 APK）—— 需本机装有 Flutter SDK
 cd chatlaw-flutter-client && flutter analyze
 ```
+
+---
+
+## 8. 第二轮：删除 `chatlaw/client/` 三层流水线 + 补齐 ONNX 导出
+
+### 8.1 触发原因
+
+Flutter 客户端走的是 `chatlaw-flutter-client/python/{rag,build,tokenize,asr}.py`，不调用
+`chatlaw/client/` 里的任何函数。据此复核「`chatlaw/client/` 是否还有保留必要」。
+
+### 8.2 复核结论（证据）
+
+**（1）活的引用只有一处。** 全仓（含子模块）grep `chatlaw.client.*`，外部引用仅：
+
+```
+develop/finetune/train_qwen3_finetune.py:42   from chatlaw.client.utils.common_utils import build_prompt as build_client_prompt
+develop/finetune/train_qwen3_finetune.py:167  return build_client_prompt(question, docs)
+develop/finetune/merge_lora.py:49             from chatlaw.client.utils.common_utils import build_prompt as build_client_prompt
+develop/finetune/merge_lora.py:306            content = build_client_prompt(COMPARE_QUESTION, docs)
+```
+
+**没有任何文件 import `chatlaw.client.{rag,build,tokenizer}`**，也没有任何文件引用它们导出的符号
+（`run_rag` / `build_prompt_pipeline` / `tokenize_prompt` / `RagResult` / …）。它们虽有 `python -m` 的
+argparse 入口，但仓内无脚本、无文档、无 CI 调用。
+
+**（2）外层实现 = Flutter 端的逐字副本。** 剥掉注释与 docstring 后逐行比对，下列函数**完全一致**：
+
+`normalize_law_name`、`normalize_article_number`、`match_law_name_from_query`、
+`parse_law_article_query`、`_doc_unique_key`、`merge_docs_keep_order`、`retrieve_laws`、
+`_format_doc_block`、`build_prompt`。
+
+差异只有三处，且**全部是 Android 适配，没有一处是算法差异**：
+
+| 方面 | 外层（已删） | Flutter 端（在跑） |
+|---|---|---|
+| 嵌入后端 | `HuggingFaceEmbeddings`（torch / sentence-transformers） | `_OnnxEmbeddings`（onnxruntime，Android 无 torch wheel） |
+| 加载失败 | 降级为空检索 | 直接抛 `FileNotFoundError` |
+| 资源获取 | `launcher.get_resources_path()` + openi | `APPDATA_DIR` + 随包资源 |
+
+**（3）「C++ 移植规格参照与回归基线」这个理由不成立。** 算法既然逐行相同，外层不提供任何
+新增算法信息；而「回归基线」需要的对比测试在仓内根本不存在（子模块的 `python_test/` 测的是
+子模块自己的实现），只能人工 `python -m chatlaw.client.rag` 手跑。此外对未来 Qt/C++ 客户端而言，
+Flutter 的 ONNX 路径才是更可移植的参照 —— 它完全不依赖 Python/torch（ONNX Runtime 与 FAISS
+本身都有 C++ API）。
+
+**（4）`common_utils.py` 561 行里只有约 62 行是活的**（`build_prompt` + `_format_doc_block`）。
+其余：RAG 检索半只被已删的 `rag.py` 调用；`speech_to_text` / `recv_exact` /
+`connection_acknowledgement` / `match_law_name_from_query` / `parse_law_article_query`
+彻底无调用方。
+
+### 8.3 执行内容
+
+| 动作 | 对象 |
+|---|---|
+| 删除 | `chatlaw/client/rag.py`、`chatlaw/client/build.py`、`chatlaw/client/tokenizer.py` |
+| 重写 | `chatlaw/client/__init__.py` —— 原惰性 import 指向已删的三个模块，留着就是坏引用；改为纯说明文件 |
+| 加 docstring | `chatlaw/client/utils/common_utils.py` 顶部加模块 docstring，标注「哪些是活的（`build_prompt`）、哪些仅作算法参考」。**代码一字未动** |
+| 新增 | `develop/RAG/export_embedding_onnx.py`（见 §8.4） |
+| 依赖 | `requirements.txt` 删 `markdown`（`rag.py` 是它唯一使用者）；develop 段新增 `onnxruntime` |
+
+> 保留 `common_utils.py` 而不删的理由：`build_prompt` 是**训练与推理的 prompt 公共契约**，
+> 动它要连带改 `develop/` 并触发重新微调。因此选择「保留 + 标注」，代价是文件内大部分函数
+> 成为无调用方的参考代码 —— 这一点已写进文件顶部 docstring，避免后来者误判为死代码而误删。
+
+### 8.4 补齐 ONNX 嵌入模型导出
+
+**背景缺口**：Flutter 在 Android 上用 onnxruntime 做向量嵌入（`_OnnxEmbeddings`），需要
+`{资源根}/vectorstore/embedding_model/model.onnx`；但 `chatlaw/dataloader/downloads.py:22-37` 的
+`vectorstore_list` 从 OpenI 下载并要求的是 **sentence-transformers 格式**
+（`pytorch_model.bin` / `modules.json` / `sentence_bert_config.json` / `1_Pooling/config.json` …），
+**没有 `model.onnx`**。而这一步的导出脚本此前只存在于某台开发机上
+（`chatlaw-flutter-client/docs/client_modules.md:307` 记为 `D:\dev\export_embedding_onnx.py`），
+**仓内无法复现**「OpenI 资源 → 安卓可用 model.onnx」，仓内也没有任何 `model.onnx` 产物。
+
+新增 `develop/RAG/export_embedding_onnx.py`，与消费方
+`chatlaw-flutter-client/python/rag.py` 的 `_OnnxEmbeddings` 严格对齐：
+
+- **输入**只声明 `input_ids` + `attention_mask`（int64）——消费方按 `if name in enc` 组装 feed，
+  声明越少越保险（`token_type_ids` 在部分 tokenizer 配置下不返回）；
+- **输出**单个 `sentence_embedding`，形状 `[batch, hidden]`；
+- **CLS / mean pooling 与 L2 normalize 内置于图**，图外不做任何后处理。pooling 方式从
+  `modules.json` + `1_Pooling/config.json` 读取（而非硬编码），读不出来时要求 `--pooling` 显式指定；
+- batch 与 sequence 均为 dynamic axes；
+- **默认做数值校验**：以 `SentenceTransformer.encode(normalize_embeddings=True)` 为基准对比
+  onnxruntime 输出（阈值 `1e-4`），并打印输出向量的 L2 范数（应全为 1.0，用于证明 normalize 确实入图）。
+  缺 `onnxruntime` 或 `sentence-transformers` 时明确打印「未验证」，**不静默通过**；
+- 产物默认写在 `<embedding_model>/model.onnx`；若同时生成 `model.onnx.data`（外部权重），
+  脚本会提醒**必须同目录一起打包**。
