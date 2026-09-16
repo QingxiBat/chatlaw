@@ -1,3 +1,37 @@
+"""ChatLaw 客户端流水线的公共工具（**大部分已无调用方，仅作算法参考**）。
+
+本文件必须保留，但只有两个函数是「活」的：
+
+1. ``build_prompt`` 与它内部调用的 ``_format_doc_block``
+   —— 这是**训练与推理的 prompt 公共契约**。``develop/finetune/train_qwen3_finetune.py``
+   与 ``merge_lora.py`` 直接 import 并调用它来生成训练数据；改动它会导致训练/推理
+   输入分布不一致，**必须重新微调模型**。
+   （Flutter 端 ``chatlaw-flutter-client/python/build.py`` 是同一份文案的副本，
+   改一处必须同步另一处。）
+
+   （本 docstring 刻意不写行号 —— 函数名稳定，行号会随编辑漂移。）
+
+2. 其余函数已无任何调用方，保留仅为避免动到上面的契约、并作为算法参考：
+
+   - RAG 检索：``load_vectorstore`` / ``load_exact_index`` /
+     ``build_law_name_candidates`` / ``retrieve_laws``（及其内部串联的
+     ``retrieve_laws_exact`` / ``retrieve_laws_faiss`` / ``merge_docs_keep_order`` /
+     ``_doc_unique_key``）。它们原先只被已删除的 ``chatlaw/client/rag.py`` 调用；
+     **真正在跑的实现在 ``chatlaw-flutter-client/python/rag.py``，与本文件是逐行等价的
+     同一份算法**，差异仅两处：嵌入后端（本文件用 torch / sentence-transformers，
+     Flutter 端用 onnxruntime，因为 Android 没有 torch wheel），以及加载失败时
+     本文件降级为空检索、Flutter 端直接报错。
+   - ASR：``speech_to_text``（Flutter 端对应 ``chatlaw-flutter-client/python/asr.py``）。
+   - MathML 渲染：``render_mathml_from_latex``（原服务于已删除的 Gradio 面板，
+     ``latex2mathml`` 因此仍留在 ``requirements.txt``）。
+   - 遗留 socket 工具：``recv_exact`` / ``connection_acknowledgement``（通信层已重构为
+     HTTP POST，见 ``chatlaw/network/http_transport.py``）。
+   - 未使用：``match_law_name_from_query`` / ``parse_law_article_query``。
+
+下游客户端要复现这条流水线时，请以 ``chatlaw-flutter-client/python/`` 为准；
+其中嵌入模型需先用 ``develop/RAG/export_embedding_onnx.py`` 导出为 ONNX。
+"""
+
 import os
 import re
 import json

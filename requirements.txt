@@ -2,7 +2,6 @@ accelerate
 transformers
 jieba
 torch>=2.9.0
-markdown
 pyyaml
 latex2mathml
 openi
