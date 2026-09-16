@@ -2,11 +2,13 @@
 
 > ⚠️ **本目录不可再生，请勿删除。**
 >
-> 向量库虽然可以从启智社区（OpenI）的 `enter/vectorstore` 重新下载，但下面两项能力
-> **只存在于本目录**，删掉就无法复现当前的知识库与微调模型：
+> 向量库虽然可以从启智社区（OpenI）的 `enter/vectorstore` 重新下载，但下面三项能力
+> **只存在于本目录**，删掉就无法复现当前的知识库、微调模型与客户端可用的嵌入模型：
 >
 > 1. **用自有法律 PDF 重建知识库**（`RAG/` 全链路）；
-> 2. **LoRA 重训与合并导出**（`finetune/` 全链路）。
+> 2. **LoRA 重训与合并导出**（`finetune/` 全链路）；
+> 3. **把嵌入模型导出为 Android 可用的 ONNX**（`RAG/export_embedding_onnx.py`）
+>    —— OpenI 上托管的是 sentence-transformers 格式，Android 端用不了，必须转换。
 
 本目录与线上推理链路解耦：服务端只加载 `chatlaw/resources/` 下已就绪的资源，不会调用这里任何脚本。
 
@@ -15,7 +17,7 @@
 ## 0. 运行前提
 
 - **所有脚本都必须在仓库根目录（`ChatLaw/`）下执行**。多个脚本的输入/输出路径是**相对当前工作目录**的（例如 `develop/resources/finetuning_dataset/dataset.json`），换目录执行会读不到文件或把产物写错地方。
-- 依赖：`pip install -r requirements.txt`（含 `pymupdf` / `tqdm` / `matplotlib` / `peft` / `bitsandbytes` 等 develop 段依赖）。
+- 依赖：`pip install -r requirements.txt`（含 `pymupdf` / `tqdm` / `matplotlib` / `peft` / `bitsandbytes` / `onnxruntime` 等 develop 段依赖）。
 - 建库与微调都需要能加载 Qwen 模型的机器（GPU 强烈建议；CPU 可跑但极慢）。
 - 模型/tokenizer 需已就绪：`chatlaw/resources/llm`、`chatlaw/resources/tokenizer`（服务端首次启动会自动下载，见 [DEPLOY_SERVER_FEDORA.md](../DEPLOY_SERVER_FEDORA.md) §6）。
 
@@ -36,6 +38,9 @@ Legal Documents/*.pdf
       │  建库
       ▼
 build_vectorstore.py  →  chatlaw/resources/vectorstore/law_faiss
+                              │
+                              └─ 同一目录下 embedding_model/ 还要再导出一次：
+                                 export_embedding_onnx.py  →  model.onnx（Android 用）
 ```
 
 ### 1.1 抽取方案（四选一，产物格式需一致）
@@ -72,7 +77,25 @@ python develop/RAG/build_vectorstore.py
 - **写**：`chatlaw/resources/vectorstore/`（即 `get_resources_path()/vectorstore`，内含 FAISS 索引与精确索引）
 - 核心逻辑在同目录 `utils.py` 的 `build_and_save_vectorstore()`，同时构造三份数据：LangChain `Document` 列表（给 FAISS）、`{law_name_norm}::{article}` 精确索引、按法律名分组的索引。
 
-### 1.4 ⚠️ 已知坑（务必先读）
+### 1.4 导出客户端可用的 ONNX 嵌入模型
+
+```bash
+python develop/RAG/export_embedding_onnx.py
+```
+
+**为什么需要**：Android 端装不了 torch / sentence-transformers（没有对应 wheel），向量嵌入改由 onnxruntime 承担（`chatlaw-flutter-client/python/rag.py` 的 `_OnnxEmbeddings`）。但 `resources/vectorstore/embedding_model` 从 OpenI 下载下来是 **sentence-transformers 格式**（`pytorch_model.bin` + `modules.json` + `1_Pooling/…`），onnxruntime 加载不了，必须先导出成 ONNX。
+
+- **读**：`chatlaw/resources/vectorstore/embedding_model/`（默认；也可用位置参数指定别的目录）
+- **写**：同目录下 `model.onnx`（大模型会额外产生 `model.onnx.data` 外部权重）
+- **脚本做的事**：从 `modules.json` + `1_Pooling/config.json` 读出 pooling 方式（`cls` / `mean`），把 **backbone → pooling → L2 normalize** 打包成一张图导出，输入只声明 `input_ids` + `attention_mask`，输出单个 `[batch, hidden]` 张量。
+- **默认会做数值校验**：用 `sentence-transformers` 的 `encode(normalize_embeddings=True)` 作为基准，与 onnxruntime 的输出比对最大绝对误差（阈值 `1e-4`），并打印输出向量的 L2 范数（应全为 1.0，用来证明 normalize 确实进了图）。缺 `onnxruntime` 或 `sentence-transformers` 时会明确打印 **「未验证」** 而不是静默通过。
+- 常用参数：`--out`（输出目录）、`--pooling {cls,mean}`（配置读不出来时显式指定）、`--transformer-dir`（模型不是 ST 布局时指向裸 transformers 目录）、`--single-file`、`--no-verify`。
+
+> **打包提醒**：把 `embedding_model` 目录打进客户端资源时，`model.onnx` 必须带上——若同时生成了 `model.onnx.data`，**两个文件必须同目录一起打包**（onnxruntime 会自动加载外部权重，漏掉就加载失败）。`pytorch_model.bin` 在 Android 侧可删除。客户端期望的路径是 `<资源根>/vectorstore/embedding_model/model.onnx`。
+
+> 这一步此前只在某台开发机上手工做过（脚本未入库），是「OpenI 资源 → 安卓可用 model.onnx」在仓库里唯一的断点。本脚本把它补上后，整条「PDF → 知识库 → 客户端资源」链路都可复现。
+
+### 1.5 ⚠️ 已知坑（务必先读）
 
 1. **`law_pdf_to_json.py:9` 残留他人机器的绝对路径**
    ```python
@@ -181,8 +204,8 @@ python develop/finetune/merge_lora.py --in-place --backup   # 替换前把原权
 
 `chatlaw/client/utils/common_utils.py` 的 **`build_prompt` 是训练与推理的公共契约**：
 
-- 推理侧：客户端流水线（`chatlaw/client/build.py`）与 Flutter 端（`chatlaw-flutter-client/python/build.py`，同一份文案）使用它；
-- 训练侧：`train_qwen3_finetune.py` / `merge_lora.py` 直接 import 它。
+- 推理侧：Flutter 端 `chatlaw-flutter-client/python/build.py`（**同一份文案的副本**）与 `chatlaw/client/utils/common_utils.py` 自身的 `build_prompt`；
+- 训练侧：`train_qwen3_finetune.py` / `merge_lora.py` 直接 import `common_utils.build_prompt`。
 
 因此：
 
@@ -196,4 +219,5 @@ Flutter 端的 `python/build.py` 是同一份文案的副本，**改一处必须
 ## 4. 遗留项（已知，未在本轮清理）
 
 - `train_qwen3_finetune.py:41-42` 的注释仍写「复用**桌面客户端**的实现」—— 桌面 Gradio 客户端已在 2026-09 结构清理中删除，措辞过期但**逻辑正确**（`common_utils.build_prompt` 仍是唯一真相源）。本轮按约束不改 `develop/` 脚本逻辑，故仅记录在此。
-- `law_pdf_to_json.py` 与 `extract_law_pure_regex.py` 的 `PDF_DIR` / `OUTPUT_DIR` 都是硬编码常量、且互相不统一；`build_vectorstore.py` 期望的输入目录与任一抽取脚本的默认输出目录都不一致。整理统一路径需改动脚本，本轮未做（见 §1.4 坑 2 的规避方法）。
+- `law_pdf_to_json.py` 与 `extract_law_pure_regex.py` 的 `PDF_DIR` / `OUTPUT_DIR` 都是硬编码常量、且互相不统一；`build_vectorstore.py` 期望的输入目录与任一抽取脚本的默认输出目录都不一致。整理统一路径需改动脚本，本轮未做（见 §1.5 坑 2 的规避方法）。
+- `export_embedding_onnx.py` 的默认位置参数依赖 `launcher.get_resources_path()`，即在仓库根目录执行时指向 `chatlaw/resources/vectorstore/embedding_model`；如果嵌入模型放在别处，需显式传目录（或在 `develop/RAG/` 下执行时用绝对路径）。

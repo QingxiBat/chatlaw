@@ -28,6 +28,11 @@ pymupdf
 bitsandbytes; platform_system != "Windows" and python_version < "3.13"
 tqdm
 
+# 把 embedding 模型导出成 Android 可用的 ONNX
+# （develop/RAG/export_embedding_onnx.py）。onnxruntime 只用于导出后的数值一致性
+# 校验与 ONNX 侧推理，因此它是 develop 段依赖；服务端与训练都不需要它。
+onnxruntime
+
 # LoRA 微调（develop/finetune/train_qwen3_finetune.py）与 adapter 合并导出
 # （develop/finetune/merge_lora.py）需要 peft。服务端推理不需要它：
 # 合并是在离线把 adapter 烧进权重，产物就是普通 transformers 模型。
