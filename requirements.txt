@@ -2,7 +2,6 @@ accelerate
 transformers
 jieba
 torch>=2.9.0
-gradio==5.49.1
 markdown
 pyyaml
 latex2mathml
@@ -15,7 +14,6 @@ langchain-community
 langchain-huggingface
 faiss-cpu
 sentence-transformers
-pyside6
 
 # MindSpore / MindNLP is only needed by the server ms route (server_ms.py).
 # The PyTorch route (server_pt.py) does NOT need it.

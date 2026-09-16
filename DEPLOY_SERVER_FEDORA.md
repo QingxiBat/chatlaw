@@ -229,7 +229,13 @@ curl -s -X POST http://127.0.0.1:6005/health -H 'Content-Type: application/json'
 curl -s -X POST http://127.0.0.1:6005/heartbeat -H 'Content-Type: application/json' -d '{"action":"PING"}'
 # 期望: {"ok": true, "reply": "PONG"}
 ```
-真正的推理 `/infer` 需要 pickle 的 `model_inputs`（tokenizer 输出），建议用仓库自带的客户端 `chatlaw/client/client_pt.py`（Gradio UI）连到本机测试；或复用项目里的 `chatlaw.network.http_transport.post_pickle` 发请求。
+真正的推理 `/infer` 需要 pickle 的 `model_inputs`（tokenizer 输出），有三种验证方式：
+
+1. **Flutter 客户端（推荐，端到端）**：用 `chatlaw-flutter-client` 构建/运行 APP，把「服务器 IP」填成本机地址。同机联调可用 `adb reverse tcp:6005 tcp:6005` + `adb reverse tcp:6006 tcp:6006`，然后在 APP 里填 `127.0.0.1`，免去配同网段。
+2. **直接发一帧请求**：复用项目里的 `chatlaw.network.http_transport.post_pickle`（与客户端同一份协议实现），把 tokenizer 输出的 `model_inputs` pickle 后 POST 到 `http://<SERVER_IP>:6006/infer`；响应是「8 字节大端长度 + pickle」的分帧流，以 `<END>` 结束。
+3. **只想调客户端、手头没有 GPU**：用 `scripts/fake_chatlaw_server.py`（仿真服务端，协议与 `http_transport.py` 完全一致），配合上面第 1 条的 `adb reverse`，即可验证「连接 → 心跳 → 流式输出 → 中断」整条链路。
+
+> 早期的 Gradio 桌面客户端（`chatlaw/client/client_pt.py`）已随本轮结构清理删除，客户端现由 `chatlaw-flutter-client` 提供；旧实现可从 tag `pre-cleanup-2026-09` 取回（见 `docs/REPO_STRUCTURE.md` §4）。
 
 ---
 

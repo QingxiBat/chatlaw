@@ -21,22 +21,25 @@ def get_development_path():
 def resolve_script_path(role, mode):
     """
     功能：
-        根据执行角色（client/server）与模式（mode）动态生成并返回对应 Python
-        启动脚本的绝对路径。该函数用于启动器（launcher）中，用于精确定位客户端
-        或服务器端不同模式的运行脚本位置，例如：
-            - client/client_normal.py
-            - server/server_local.py
+        根据执行角色（server）与模式（mode）动态生成并返回对应 Python
+        启动脚本的绝对路径。该函数用于启动器（launcher）中，用于精确定位服务端
+        不同模式的运行脚本位置，例如：
+            - server/server_pt.py
+            - server/server_ms.py
         等等。
 
         函数会检查生成的路径是否存在，若不存在则抛出异常，确保启动器不会执行
         无效路径。
 
+        注：早期的客户端角色（`client/client_pt.py`、`client/client_ms.py`）已废弃
+        并删除，客户端现由 `chatlaw-flutter-client` 提供，故不再支持 `"client"`。
+
     Args:
-        role (str): 执行角色，必须是 `"client"` 或 `"server"`。
-        mode (str): 运行模式，用于匹配对应脚本名称，例如 "normal"、"local" 等。
+        role (str): 执行角色，目前仅支持 `"server"`。
+        mode (str): 运行模式，用于匹配对应脚本名称，例如 "pt"、"ms"。
 
     Inputs:
-        - **role**: 角色类别，用于确定脚本目录 client/ 或 server/。
+        - **role**: 角色类别，用于确定脚本目录 server/。
         - **mode**: 模式名称，用于拼接脚本文件名。
         - 函数依赖全局工具：
             - **get_project_root()**: 返回项目根目录路径。
@@ -46,17 +49,15 @@ def resolve_script_path(role, mode):
         str: 返回匹配到的脚本的绝对路径。如果路径存在，则必定是一个可执行的 .py 文件。
 
     Raises:
-        ValueError: 若 role 不是 "client" 或 "server"。
+        ValueError: 若 role 不是 "server"。
         FileNotFoundError: 若拼接出的脚本路径不存在。
     """
     root = get_project_root()
 
-    if role == "client":
-        script = os.path.join(root, "client", f"client_{mode}.py")
-    elif role == "server":
+    if role == "server":
         script = os.path.join(root, "server", f"server_{mode}.py")
     else:
-        raise ValueError("未知角色 client/server")
+        raise ValueError("未知角色，仅支持 server")
 
     if not os.path.exists(script):
         raise FileNotFoundError(f"脚本不存在: {script}")
@@ -101,15 +102,16 @@ def main():
         ChatLaw 命令行入口函数（CLI）。
         用于解析用户在命令行输入的指令，并根据不同子命令执行对应的功能模块。
         整体功能包括：
-            - 启动 ChatLaw 客户端程序（client ms/pt）
             - 启动 ChatLaw 服务端程序（server ms/pt）
             - 清理资源目录（clear）
 
         该函数负责构建 argparse 命令结构、解析用户输入，并调用相应的脚本启动逻辑。
 
+        注：客户端子命令（`chatlaw client <ms|pt>`）随旧 Gradio 客户端一起废弃删除，
+        客户端现由 `chatlaw-flutter-client` 提供。
+
     Inputs:
         本函数无显式输入参数，但依赖直接执行命令行时传入的参数，如：
-            chatlaw client ms  --SERVER_IP "127.0.0.1"
             chatlaw server pt
             chatlaw clear
 
@@ -134,7 +136,6 @@ def main():
             "ChatLaw 命令行工具\n"
             "\n"
             "可用指令包括：\n"
-            "  chatlaw client <ms|pt> [其他参数]    启动客户端模式\n"
             "  chatlaw server <ms|pt> [其他参数]    启动服务端模式\n"
             "  chatlaw clear                 清理 resources 文件夹（等价于 chatlaw clear_files）\n"
             "\n"
@@ -142,24 +143,12 @@ def main():
             "  - ms  表示使用MindNLP版本\n"
             "  - pt  表示使用Transformers版本\n"
             "  - clear 会在删除前执行交互式确认\n"
+            "  - 客户端请使用 chatlaw-flutter-client（本 CLI 不再提供 client 子命令）\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-
-    client_parser = subparsers.add_parser(
-        "client",
-        description=(
-            "客户端模式：\n"
-            "  用于启动 ChatLaw 客户端程序。\n"
-            "  支持两种模式：ms（MindNLP版本）与 pt（Transformers版本）。\n"
-        )
-    )
-    client_parser.add_argument(
-        "mode", choices=["ms", "pt"], help="启动模式：ms=MindNLP版本, pt=Transformers版本"
-    )
-    client_parser.add_argument("extra", nargs=argparse.REMAINDER, help="传递给客户端脚本的额外参数")
 
     server_parser = subparsers.add_parser(
         "server",
@@ -186,9 +175,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "client":
-        run_python_script(resolve_script_path("client", args.mode), args.extra)
-    elif args.command == "server":
+    if args.command == "server":
         run_python_script(resolve_script_path("server", args.mode), args.extra)
     elif args.command in ("clear", "clear_files"):
         run_python_script(os.path.join(get_project_root(), "clear_files.py"), [])
