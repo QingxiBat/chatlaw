@@ -1,10 +1,12 @@
 # ChatLaw 仓库结构清理清单（Feat_app 分支）
 
-> 本文档是 **2026-09 仓库结构清理与文档校准** 的执行依据与留档，覆盖两轮：
+> 本文档是 **2026-09 仓库结构清理与文档校准** 的执行依据与留档，覆盖三轮：
 >
 > - **第一轮（§1–§7）**：删除已废弃的 Gradio 桌面客户端与桌面包壳，重写 README。
 > - **第二轮（§8）**：删除 `chatlaw/client/` 三层流水线（已无调用方，被 Flutter 端
 >   逐行等价的实现取代），并补齐此前缺失的 ONNX 嵌入模型导出脚本。
+> - **第三轮（§9）**：删除 `chatlaw/client/` 整目录 —— 把唯一还活着的 prompt 契约
+>   提到 `chatlaw/prompt.py`，其余死代码一并删除。
 >
 > 冻结点：tag `pre-cleanup-2026-09`（Feat_app @ `774bcf9`）。
 > 原则：**只清理已失效的客户端代码，不动任何服务端 / 协议 / 算法 / prompt 公共契约**。
@@ -22,7 +24,7 @@
 | 客户端（旧，第一轮删除） | `chatlaw/client/client_{pt,ms}.py` + Gradio UI | 已删除 |
 | 客户端流水线（旧，第二轮删除） | `chatlaw/client/{rag,build,tokenizer}.py` | 已删除；实现在 Flutter 端 |
 | 客户端流水线（当前） | `chatlaw-flutter-client/python/{rag,build,tokenize,asr}.py` | **唯一在跑的实现** |
-| prompt 公共契约（保留） | `chatlaw/client/utils/common_utils.py` 的 `build_prompt` | **活的**：`develop/finetune/` 直接调用 |
+| prompt 公共契约（保留） | `chatlaw/prompt.py` 的 `build_prompt` | **活的**：`develop/finetune/` 直接调用（第三轮从 `chatlaw/client/utils/common_utils.py` 原样搬迁） |
 | 离线工具链 | `develop/`（RAG 建库 + ONNX 导出 + LoRA 微调） | 保留，**能力不可再生** |
 | 后续方向 | C++ 重写算法 + Qt 前端 | 不引入任何 C++/Qt 代码 |
 
@@ -35,11 +37,11 @@
 | 路径 | 引用证据（谁在用） |
 |---|---|
 | `chatlaw/server/**` | `setup.py` `find_packages(include=["chatlaw","chatlaw.*"])`；部署入口 `python -m chatlaw.server.server_pt`。`server_pt.py:24` / `server_ms.py:20` 分别 import `launcher.get_resources_path` 与 `chatlaw.network.http_transport` |
-| `chatlaw/network/**` | `server_pt.py:17`、`server_ms.py:20`（`http_transport`）、`server_pt.py:23`（`tensor_utils.to_device_tensors`）、`chatlaw/client/utils/common_utils.py:7` |
+| `chatlaw/network/**` | `server_pt.py:17`、`server_ms.py:20`（`http_transport`）、`server_pt.py:23`（`tensor_utils.to_device_tensors`） |
 | `chatlaw/dataloader/**` | `server_pt.py:16`、`server_ms.py:19`、`chatlaw/clear_files.py:14`、`develop/finetune/train_qwen3_finetune.py:43`、`merge_lora.py:50-51`（第二轮前还有已删的 `chatlaw/client/{rag.py:23, tokenizer.py:17}`） |
 | `chatlaw/configuration.py` | `server_pt.py:15`、`server_ms.py:18`；自身 `:7` 依赖 `launcher.get_project_root` |
 | `chatlaw/config.yaml` | `configuration.py:9` 拼 `get_project_root()/config.yaml` 读取；含 `SERVER_IP` / `HEARTBEAT_PORT` / `DATA_PORT` / `INFER_PATH` |
-| `launcher.py` | **运行时依赖，不是启动器**。被 `chatlaw/server/server_pt.py:24`、`chatlaw/configuration.py:7`、`chatlaw/dataloader/downloads.py:6`、`chatlaw/client/utils/common_utils.py:6`、`develop/RAG/*`、`develop/RAG/export_embedding_onnx.py`、`develop/finetune/*` 直接 import。**绝不能整文件删除**，第二轮只摘掉其中指向已删客户端的 `client` 子命令 |
+| `launcher.py` | **运行时依赖，不是启动器**。被 `chatlaw/server/server_pt.py:24`、`chatlaw/configuration.py:7`、`chatlaw/dataloader/downloads.py:6`、`develop/RAG/*`、`develop/RAG/export_embedding_onnx.py`、`develop/finetune/*` 直接 import。**绝不能整文件删除**，第二轮只摘掉其中指向已删客户端的 `client` 子命令 |
 | `setup.py` | 打包入口，`entry_points` 指向 `launcher:main`，`py_modules=["launcher"]` |
 | `requirements.txt` | 服务端（pt 臂线）+ develop 工具链依赖 |
 | `requirements-server-ms.txt` | ms 臂线依赖说明（mindnlp 需 Python ≤ 3.11） |
@@ -52,8 +54,7 @@
 
 | 路径 | 为什么必须留 |
 |---|---|
-| `chatlaw/client/utils/common_utils.py` | **`build_prompt` 与 `_format_doc_block` 是训练与推理的 prompt 公共契约**，被 `develop/finetune/train_qwen3_finetune.py`、`merge_lora.py` 直接 import 并调用。**这两个函数一字不改**；文件内其余部分（RAG 检索 / ASR / MathML / 遗留 socket 工具）已无调用方，第二轮只加了文件顶部 docstring 标注，未动任何代码 |
-| `chatlaw/client/__init__.py` | 包标记 + 说明为何本包只剩 `utils/common_utils.py`（第二轮重写；原惰性 import 已删，因为它指向的 `build.py` / `rag.py` / `tokenizer.py` 不存在了） |
+| `chatlaw/prompt.py` | **训练与推理的 prompt 公共契约**。`build_prompt` 及其内部调用的 `_format_doc_block` 被 `develop/finetune/train_qwen3_finetune.py`、`merge_lora.py` 直接 import 并调用。第三轮从 `chatlaw/client/utils/common_utils.py` **原样搬迁**（逐字节一致，见 §9.2），函数体一字未改 |
 | `develop/**` | 知识库重建、ONNX 嵌入导出与 LoRA 微调的**唯一**入口，见 `develop/README.md` |
 | `scripts/orangepi/**` | 昇腾 310p/310b 环境安装脚本，ms 臂线部署依赖 |
 | `scripts/fake_chatlaw_server.py` | 客户端联调桩（实现与 `http_transport.py` 一致的 6005/6006 HTTP 协议，配合 `adb reverse` 使用） |
@@ -91,12 +92,15 @@
 | `gradio==5.49.1` | **第一轮删** | 全仓仅 `client_pt.py:4` / `client_ms.py:4` 使用 |
 | `pyside6` | **第一轮删** | 全仓仅 `launcher_gui.py:6` 使用 |
 | `markdown` | **第一轮保留、第二轮删** | 第一轮它被保留下来的 `rag.py:18` 顶层 import；第二轮 `rag.py` 也删了，全仓不再有任何引用 |
-| `latex2mathml` | **保留** | `common_utils.py:64` 使用于 `render_mathml_from_latex`。该函数第二轮后已无调用方，但 `common_utils.py` 按约定不动代码，故依赖一并保留 |
-| `funasr_onnx`、`soundfile`、`librosa` | **保留** | `common_utils.py` 的 `speech_to_text` 引用（该函数第二轮后亦无调用方，理由同上） |
-| `langchain*`、`faiss-cpu`、`sentence-transformers` | **保留** | 被 `develop/RAG/utils.py:6-8` 顶层 import（离线建库与导出必需）。它们同时也是 `common_utils` RAG 半的依赖，但**决定性理由是 develop** |
+| `latex2mathml` | **第三轮删** | 只被 `common_utils.render_mathml_from_latex` 使用（`latex2mathml.converter`）。该函数第二轮后已无调用方，第三轮随 `chatlaw/client/` 一并删除 |
+| `funasr_onnx`、`soundfile`、`librosa` | **第三轮删** | 只被 `common_utils.speech_to_text` 使用。Flutter 端 `python/asr.py` 已改用标准库 `wave` + 纯 numpy 重采样，其自己的 `python/requirements.txt` 注明「桌面端需要时手动安装」 |
+| `langchain*`、`faiss-cpu`、`sentence-transformers` | **保留** | 被 `develop/RAG/utils.py:6-8` 顶层 import（离线建库），`sentence-transformers` 另被 `export_embedding_onnx.py` 用于数值校验 |
 | `onnxruntime` | **第二轮新增** | `develop/RAG/export_embedding_onnx.py` 用于导出后的数值一致性校验与 ONNX 侧推理。放在 develop 段，服务端与训练都不需要 |
+| `pyyaml`、`accelerate`、`jieba` | **保留（未动）** | 排查时易被误判为无用，实际：`pyyaml` 的模块名是 `yaml`（`chatlaw/configuration.py:6`）；`accelerate` 无显式 import，但 `server_pt.py` 的 `device_map="auto"` 在运行时需要它；`jieba` 全仓无引用，属**早已存在的孤儿**，本轮未动（要清理可单独提） |
 
-> ⚠️ 勘误记录（第一轮）：任务书原稿称「`render_mathml_from_latex` 已无调用方」。当时实测 `chatlaw/client/rag.py:147` 仍在调用它，故 `latex2mathml` 必须保留；两轮之后 `rag.py` 已删，该函数确实失去调用方，但 `common_utils.py` 的代码按约定不动，依赖随之保留。
+> ⚠️ 勘误记录（第一轮）：任务书原稿称「`render_mathml_from_latex` 已无调用方」。当时实测 `chatlaw/client/rag.py:147` 仍在调用它，故 `latex2mathml` 必须保留；第三轮 `rag.py` 与 `common_utils.py` 均已删除，依赖随之移除。
+>
+> ⚠️ 排查依赖时的坑：**PyPI 包名 ≠ 模块名**。`pyyaml`→`yaml`、`faiss-cpu`→ 经 langchain 使用、`accelerate`→ 无 import 但 `device_map="auto"` 需要。按包名 grep 会得到四个假阴性，直接删会打断已跑通的服务端。
 
 ### 3.2 `launcher.py` 的同步修改
 
@@ -154,13 +158,21 @@ git checkout <该提交>^ -- docs/client_functions.md
 3. `requirements.txt` 加回 `markdown`；
 4. 注意：即便回退，它们**依然没有任何调用方** —— 回退只是为了让代码可读，不会让它重新参与运行。
 
+若将来需要回退第三轮（`chatlaw/client/` 整目录）：
+1. `git checkout 8babfe7 -- chatlaw/client/`（`8babfe7` 是第二轮文档提交，当时 `common_utils.py` 与 `__init__.py` 尚在）；
+2. `requirements.txt` 加回 `latex2mathml` / `funasr_onnx` / `soundfile` / `librosa`；
+3. `develop/finetune/{train_qwen3_finetune,merge_lora}.py` 的 import 改回
+   `from chatlaw.client.utils.common_utils import build_prompt`；
+4. 但**没必要回退**：`chatlaw/prompt.py` 与原 `common_utils.build_prompt` 的输出逐字节相同
+   （§9.2 有断言），回退只会把死代码装回来。
+
 ---
 
 ## 5. 已知坑与遗留项
 
 1. **`develop/RAG/law_pdf_to_json.py:9` 残留他人机器的绝对路径** —— 默认路径写死在原作者机器上，直接跑会失败，需显式传参或改常量。
 2. **`develop/RAG/law_pdf_to_json.py` 的默认 `OUTPUT_DIR` 与 `build_vectorstore.py:7` 的读取路径不一致** —— 建库链路需要人工把产物挪到 `build_vectorstore.py` 期望的位置，否则「建库成功但检索为空」。
-3. **`common_utils.speech_to_text` / `render_mathml_from_latex` / RAG 检索半 / 遗留 socket 工具** —— 已全部无调用方（`render_mathml_from_latex` 随第二轮删除 `rag.py` 失去最后的调用方）。Flutter 端在 `chatlaw-flutter-client/python/` 内有自己的实现。**按约定保留**，`common_utils.py` 只在文件顶部加了 docstring 说明，代码一字未动。
+3. **`common_utils` 的其余部分（RAG 检索 / ASR / MathML / 遗留 socket 工具）** —— 第三轮已随 `chatlaw/client/` 整目录删除。这些是被 Flutter 端 `chatlaw-flutter-client/python/` 逐行等价取代的重复实现，删掉无信息损失。
 4. **子模块 `chatlaw-flutter-client/docs/client_functions.md`** —— 错位且过期：全篇引用外层 `chatlaw/**` 路径（`client_pt.py:35` / `client_ms.py:65` 等），描述的 `format_retrieved_docs_html` 已不存在，行号滞后 2~12 行。**已按用户确认删除**：在子模块内单独提交（`docs: 删除错位过期的 client_functions.md`），随后在外层 bump submodule 指针。同目录 `docs/client_modules.md` 描述的是子模块自身的 `python/**` 模块，内容准确，**保留**。
 5. **ONNX 导出脚本的默认路径** —— `export_embedding_onnx.py` 的默认模型目录来自 `launcher.get_resources_path()`，因此要在**仓库根目录**执行；模型放在别处需显式传位置参数。
 
@@ -191,21 +203,29 @@ python -c "import launcher, chatlaw.configuration, chatlaw.dataloader, chatlaw.n
 # 2) CLI 应只列 server / clear / clear_files
 python launcher.py --help
 
-# 3) chatlaw.client 包仍可导入（第二轮后只剩 common_utils，不需要任何第三方依赖）
-python -c "import chatlaw.client, chatlaw.client.utils.common_utils; print('ok')"
+# 3) prompt 契约可导入且可调用（不需要任何第三方依赖）
+python -c "
+import sys; sys.path.insert(0,'.')
+from chatlaw.prompt import build_prompt
+out = build_prompt('问题', [{'law_name':'中华人民共和国民法典','article':'第二百八十八条','content':'……'}])
+assert '1. 《中华人民共和国民法典》第二百八十八条：' in out and '【回答】' in out
+print('ok')"
 
 # 4) 微调链路未断：模板单一真相源
-grep -n "def build_prompt" chatlaw/client/utils/common_utils.py
-grep -n "common_utils" develop/finetune/train_qwen3_finetune.py develop/finetune/merge_lora.py
+grep -n "def build_prompt" chatlaw/prompt.py
+grep -n "^from chatlaw.prompt import build_prompt" develop/finetune/train_qwen3_finetune.py develop/finetune/merge_lora.py
 
-# 5) 悬空引用检查（应无输出）
-grep -rn "client_pt\|client_ms\|utils_pt\|utils_ms\|launcher_gui\|try_rag\|push_to_all_repositories\|get-pip\|chatlaw.client.rag\|chatlaw.client.build\|chatlaw.client.tokenizer" . \
-  --exclude-dir=.git --exclude-dir=.zcode | grep -v "^./chatlaw-flutter-client/docs/"
+# 5) chatlaw.client 应已不存在（期望 ModuleNotFoundError）
+python -c "import chatlaw.client" 2>&1 | tail -1
 
-# 6) ONNX 导出脚本可用（需要 torch/transformers/onnxruntime）
+# 6) 悬空引用检查（应无输出）
+grep -rn "chatlaw\.client\|common_utils\|client_pt\|client_ms\|utils_pt\|utils_ms\|launcher_gui\|try_rag\|push_to_all_repositories\|get-pip" . \
+  --include="*.py" --exclude-dir=.git --exclude-dir=.zcode --exclude-dir=chatlaw-flutter-client
+
+# 7) ONNX 导出脚本可用（需要 torch/transformers/onnxruntime）
 python develop/RAG/export_embedding_onnx.py --help
 
-# 7) Flutter 侧未受影响（在子模块内执行，不构建 APK）—— 需本机装有 Flutter SDK
+# 8) Flutter 侧未受影响（在子模块内执行，不构建 APK）—— 需本机装有 Flutter SDK
 cd chatlaw-flutter-client && flutter analyze
 ```
 
@@ -296,3 +316,64 @@ Flutter 的 ONNX 路径才是更可移植的参照 —— 它完全不依赖 Pyt
   缺 `onnxruntime` 或 `sentence-transformers` 时明确打印「未验证」，**不静默通过**；
 - 产物默认写在 `<embedding_model>/model.onnx`；若同时生成 `model.onnx.data`（外部权重），
   脚本会提醒**必须同目录一起打包**。
+
+---
+
+## 9. 第三轮：删除 `chatlaw/client/` 整目录，prompt 契约提到 `chatlaw/prompt.py`
+
+### 9.1 触发与结论
+
+第二轮之后 `chatlaw/client/` 只剩 `utils/common_utils.py`（561 行），而其中**只有
+`build_prompt` + `_format_doc_block`（约 62 行）还有调用方**，调用方是 `develop/finetune/`
+的训练与合并脚本 —— 与「client」毫无关系。目录名在撒谎，且整份文件会被打进 wheel。
+因此第三轮把这对函数**原样搬迁**到 `chatlaw/prompt.py`，其余死代码全部删除。
+
+保留 `common_utils.py` 的全部理由在第三轮失效了：唯一约束是「不能动 prompt 契约」，
+而搬迁（而非改写）恰好满足这个约束。
+
+### 9.2 搬迁的等价性证明
+
+搬迁前后用同一组输入对比两份实现，**输出逐字节相同**：
+
+| 用例 | 结果 |
+|---|---|
+| 结构化 dict 法条 | 一致（len=269） |
+| 多条法条 + 缺失字段 | 一致（len=286） |
+| FAISS `Document` 对象 | 一致（len=268） |
+| 空 docs（走「未检索到可用法律条文」分支） | 一致（len=246） |
+| 未知类型（走 `str(item)` fallback） | 一致（len=253） |
+
+断言方式：`chatlaw.prompt.build_prompt(q, docs) == chatlaw.client.utils.common_utils.build_prompt(q, docs)`
+对上述 5 个用例全部成立。搬迁后另用 develop 的调用方式实测法条块格式
+（`1. 《中华人民共和国民法典》第二百八十八条：`）与模板结构（`【法律条文】（用户不可见）` / `【回答】`）未变。
+
+### 9.3 执行内容
+
+| 动作 | 对象 |
+|---|---|
+| 新增 | `chatlaw/prompt.py` —— `build_prompt` + `_format_doc_block` **函数体一字未改**，附模块 docstring 说明契约与「改动必须重训」 |
+| 删除 | `chatlaw/client/` **整目录**（`__init__.py`、`utils/__init__.py`、`utils/common_utils.py`） |
+| 改 import | `develop/finetune/train_qwen3_finetune.py`、`merge_lora.py` 各 1 行 → `from chatlaw.prompt import build_prompt`；顺带修掉 train 里那句已失效的「复用**桌面客户端**的实现」注释 |
+| 依赖 | `requirements.txt` 删除 `latex2mathml`、`funasr_onnx`、`soundfile`、`librosa`（四者的唯一使用者都在被删的 `common_utils.py` 里） |
+
+### 9.4 依赖排查的两个坑（记录下来避免重犯）
+
+1. **PyPI 包名 ≠ 模块名**，按包名 grep 会产生假阴性：
+   - `pyyaml` 的模块名是 `yaml`（`chatlaw/configuration.py:6`）；
+   - `accelerate` 没有任何显式 import，但 `server_pt.py` 的 `device_map="auto"` 在运行时需要它；
+   - `faiss-cpu` 只通过 `langchain_community.vectorstores.FAISS` 间接使用。
+   这三个**必须保留**——照「grep 不到就删」处理会打断已跑通的服务端部署。
+2. `jieba` 全仓无任何引用，但**这是早已存在的孤儿**，不是本轮删除造成的，故本轮未动；
+   要清理可单独提一个提交。
+
+### 9.5 关于目录名与客户端位置的说明
+
+- 本轮**没有移动、也没有改名 `chatlaw-flutter-client`**（它仍是根目录下的 submodule）。
+  实测结论留档在此，供将来决策：
+  - 把 Flutter 工程放进 `chatlaw/` 会被 `MANIFEST.in` 的 `recursive-include chatlaw *.*`
+    与 `setup.py` 的 `package_data={"chatlaw": ["**/*"]}` 卷进 sdist 与 wheel
+    （实测 wheel 里出现 `chatlaw/flutter-client/build/artifacts.bin` 等 4 个条目；
+    真实子模块的 `build/` 是 2.4GB）。`.gitignore` 对打包不起作用。
+  - 外层仓库**无法跟踪子模块目录内的文件**：`git add chatlaw-flutter-client/x` 会直接报
+    `fatal: Pathspec ... is in submodule`，外层只会一直显示 gitlink 变脏。
+  - 因此「把外层文件合并进子模块目录」这条路必须先把 submodule 取消掉才可行。

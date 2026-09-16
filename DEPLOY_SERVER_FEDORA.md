@@ -331,7 +331,7 @@ rm -f chatlaw/resources/llm/model*.safetensors chatlaw/resources/llm/model.safet
 
 ### 12.5 注意点
 
-- **prompt 模板只有一份真相源**：客户端推理模板在 `chatlaw/client/utils/common_utils.py` 的 `build_prompt`（Flutter 端 `chatlaw-flutter-client/python/build.py` 是同一份文案，改动需同步），训练脚本 `train_qwen3_finetune.py` 的 `build_user_content` **直接复用**它，所以训练与推理的系统设定、约束文案、【法律条文】结构天然一致。**前提是拿这个新脚本重新训练过**：改动客户端模板后必须重新微调，旧 adapter 学的是旧模板。
+- **prompt 模板只有一份真相源**：模板在 `chatlaw/prompt.py` 的 `build_prompt`（Flutter 端 `chatlaw-flutter-client/python/build.py` 是同一份文案，改动需同步），训练脚本 `train_qwen3_finetune.py` 直接 import 并**复用**它，所以训练与推理的系统设定、约束文案、【法律条文】结构天然一致。**前提是拿这个新脚本重新训练过**：改动模板后必须重新微调，旧 adapter 学的是旧模板。
 - **法条块渲染**：训练样本的 `reference` 元素如果是结构化对象（`law_name`/`article`/`content`），渲染结果与线上检索出来的完全一致；如果是纯字符串，则渲染成 `N. 原文`。想让两者严格一致，就把 `dataset.json` 的 `reference` 写成结构化对象，或采样一份原文确认格式。
 - **tokenizer 没有变**：微调不改 tokenizer，客户端与协议无需改动；但如果你在微调里替换过 tokenizer 或改了 `chat_template`，必须同步更新客户端与打进 APK 的 `resources/tokenizer`。
 - 服务端生成参数仍是硬编码的 `max_new_tokens=4096 / temperature=0.7`，不随模型变化。

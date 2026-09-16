@@ -75,11 +75,6 @@ ChatLaw/
 │       ├── flow shart.png
 │       └── show.gif
 ├── chatlaw
-│   ├── client
-│   │   ├── utils
-│   │   │   ├── __init__.py
-│   │   │   └── common_utils.py
-│   │   └── __init__.py
 │   ├── dataloader
 │   │   ├── __init__.py
 │   │   └── downloads.py
@@ -94,7 +89,8 @@ ChatLaw/
 │   ├── __init__.py
 │   ├── clear_files.py
 │   ├── config.yaml
-│   └── configuration.py
+│   ├── configuration.py
+│   └── prompt.py
 ├── develop
 │   ├── RAG
 │   │   ├── batch_extract_all_laws.py
@@ -106,10 +102,11 @@ ChatLaw/
 │   │   ├── law_pdf_to_json.py
 │   │   ├── utils.py
 │   │   └── verify_extraction.py
-│   └── finetune
-│       ├── merge_lora.py
-│       ├── split_dataset.py
-│       └── train_qwen3_finetune.py
+│   ├── finetune
+│   │   ├── merge_lora.py
+│   │   ├── split_dataset.py
+│   │   └── train_qwen3_finetune.py
+│   └── README.md
 ├── docs
 │   └── REPO_STRUCTURE.md
 ├── scripts
@@ -154,8 +151,7 @@ ChatLaw/
 | `chatlaw/network/` | HTTP 通信层（`http_transport.py`）与张量搬运（`tensor_utils.py`） |
 | `chatlaw/dataloader/` | 从启智社区（OpenI）下载 tokenizer / 模型 / 向量库等资源 |
 | `chatlaw/configuration.py` + `config.yaml` | 合并默认配置与 `config.yaml`，全局单一配置源 |
-| `chatlaw/client/` | **算法参考，不参与运行时**。原有的三层流水线（`rag.py` → `build.py` → `tokenizer.py`）已删除；只剩 `utils/common_utils.py`，其中 `build_prompt` 是训练/推理的 prompt 公共契约（活的），RAG 检索部分仅作参考——真正在跑的实现在 `chatlaw-flutter-client/python/` |
-| `chatlaw/client/utils/common_utils.py` | RAG 检索、prompt 模板（`build_prompt`）、LaTeX 渲染等公共工具。**`build_prompt` 是训练/推理的公共契约，改动需重新微调模型**；其余函数已无调用方，详见文件顶部 docstring |
+| `chatlaw/prompt.py` | **prompt 模板，训练与推理的公共契约**（`build_prompt`）。`develop/finetune/` 的训练与合并脚本直接 import 它生成训练数据；客户端有同一份文案的副本（`chatlaw-flutter-client/python/build.py`），**改一处必须同步另一处，并重新微调模型** |
 | `chatlaw/clear_files.py` | `chatlaw clear` 的实现，删除 `chatlaw/resources` 下的资源缓存 |
 | `launcher.py` | CLI 入口（`chatlaw` 命令）。同时提供 `get_resources_path()` 等被服务端与离线脚本直接 import 的工具函数 |
 | `develop/` | **离线工具链**：知识库构建与 LoRA 微调，见 [develop/README.md](develop/README.md) |
@@ -268,7 +264,7 @@ git submodule update --init --recursive
 
 > 早期的 Gradio 桌面客户端（`chatlaw/client/client_pt.py` / `client_ms.py` / `launcher_gui.py`）已在 2026-09 结构清理中删除，客户端现由 `chatlaw-flutter-client` 统一提供。如需取回旧实现，见 [docs/REPO_STRUCTURE.md](docs/REPO_STRUCTURE.md) §4。
 >
-> `chatlaw/client/` 下的**三层流水线（`rag.py` / `build.py` / `tokenizer.py`）也已删除**——它们没有任何调用方，真正在跑的实现在 `chatlaw-flutter-client/python/`（`rag.py` / `build.py` / `tokenize.py` / `asr.py`），与之逐行等价。现在 `chatlaw/client/` 仅剩 `utils/common_utils.py`，其中**只有 `build_prompt` 是活的**（`develop/finetune/` 直接调用它生成训练数据），其余为算法参考。
+> `chatlaw/client/` 整目录也已删除：三层流水线（`rag.py` / `build.py` / `tokenizer.py`）没有任何调用方，真正在跑的实现在 `chatlaw-flutter-client/python/`（`rag.py` / `build.py` / `tokenize.py` / `asr.py`），与之逐行等价；`utils/common_utils.py` 里只有 `build_prompt` 是活的，已搬到 [`chatlaw/prompt.py`](chatlaw/prompt.py)，其余死代码一并删除。
 
 ### 4.命令行工具
 
@@ -319,7 +315,7 @@ _注意：卸载不会删除已下载的模型文件，请先执行清理命令�
 
 > ⚠️ **不可再生**：向量库虽然可以从启智社区（OpenI）的 `enter/vectorstore` 重新下载，但**「用自有 PDF 建库」与「LoRA 重训」这两项能力只存在于 `develop/`**。删掉这棵子树就无法复现当前的模型与知识库。逐脚本说明见 [develop/README.md](develop/README.md)。
 
-微调链路的 prompt 模板单一真相源是 `chatlaw/client/utils/common_utils.py` 的 `build_prompt`，训练脚本直接复用；**改动模板必须重新微调**（详见 [DEPLOY_SERVER_FEDORA.md](DEPLOY_SERVER_FEDORA.md) §12）。
+微调链路的 prompt 模板单一真相源是 [`chatlaw/prompt.py`](chatlaw/prompt.py) 的 `build_prompt`，训练脚本直接复用；**改动模板必须重新微调**（详见 [DEPLOY_SERVER_FEDORA.md](DEPLOY_SERVER_FEDORA.md) §12）。
 
 ---
 
@@ -346,11 +342,7 @@ _注意：卸载不会删除已下载的模型文件，请先执行清理命令�
 
 ## 其他说明
 
-联系人：李尚憬
-
-联系邮箱: 1755397894@qq.com
-
-启智社区个人主页：https://openi.pcl.ac.cn/enter （本项目所用数据集和模型均托管于此）
+数据集和模型托管仓库（启智社区）：https://openi.pcl.ac.cn/enter
 
 ### 历史存档
 

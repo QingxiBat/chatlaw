@@ -160,7 +160,7 @@ python develop/finetune/train_qwen3_finetune.py
   - `develop/finetune/qwen3_4b_lora_finetuned/`（Trainer 产物 + `dropped_samples.json`）
   - `chatlaw/resources/llm/lora_adapter/`（LoRA adapter，供 `merge_lora.py` 使用）
 - **配置全在脚本头部**（无命令行参数）：`MAX_LENGTH=1024`、`NUM_TRAIN_EPOCHS=3`、`PER_DEVICE_TRAIN_BATCH_SIZE=1`、`GRADIENT_ACCUMULATION_STEPS=8`、`LEARNING_RATE=2e-4`、`USE_BF16`、`GRADIENT_CHECKPOINTING` 等。
-- **prompt 模板复用**：`train_qwen3_finetune.py` 直接 import `chatlaw/client/utils/common_utils.py` 的 `build_prompt`，训练与推理共用同一份系统设定与法条块结构 —— 这是**单一真相源**。
+- **prompt 模板复用**：`train_qwen3_finetune.py` 直接 import `chatlaw/prompt.py` 的 `build_prompt`，训练与推理共用同一份系统设定与法条块结构 —— 这是**单一真相源**。
 - ⚠️ 注意日志里的 `[WARN]`：prompt 占满 `MAX_LENGTH` 的样本 `labels` 全为 `-100`（等于没参与训练）。出现较多时应精简参考法条或调大 `MAX_LENGTH` 后重跑。
 
 ### 2.4 合并导出（服务端加载的前提）
@@ -202,10 +202,10 @@ python develop/finetune/merge_lora.py --in-place --backup   # 替换前把原权
 
 ## 3. 最重要的约束：prompt 模板改动必须重训
 
-`chatlaw/client/utils/common_utils.py` 的 **`build_prompt` 是训练与推理的公共契约**：
+`chatlaw/prompt.py` 的 **`build_prompt` 是训练与推理的公共契约**：
 
-- 推理侧：Flutter 端 `chatlaw-flutter-client/python/build.py`（**同一份文案的副本**）与 `chatlaw/client/utils/common_utils.py` 自身的 `build_prompt`；
-- 训练侧：`train_qwen3_finetune.py` / `merge_lora.py` 直接 import `common_utils.build_prompt`。
+- 推理侧：Flutter 端 `chatlaw-flutter-client/python/build.py`（**同一份文案的副本**）；
+- 训练侧：`train_qwen3_finetune.py` / `merge_lora.py` 直接 import `chatlaw.prompt.build_prompt`。
 
 因此：
 
@@ -218,6 +218,5 @@ Flutter 端的 `python/build.py` 是同一份文案的副本，**改一处必须
 
 ## 4. 遗留项（已知，未在本轮清理）
 
-- `train_qwen3_finetune.py:41-42` 的注释仍写「复用**桌面客户端**的实现」—— 桌面 Gradio 客户端已在 2026-09 结构清理中删除，措辞过期但**逻辑正确**（`common_utils.build_prompt` 仍是唯一真相源）。本轮按约束不改 `develop/` 脚本逻辑，故仅记录在此。
 - `law_pdf_to_json.py` 与 `extract_law_pure_regex.py` 的 `PDF_DIR` / `OUTPUT_DIR` 都是硬编码常量、且互相不统一；`build_vectorstore.py` 期望的输入目录与任一抽取脚本的默认输出目录都不一致。整理统一路径需改动脚本，本轮未做（见 §1.5 坑 2 的规避方法）。
 - `export_embedding_onnx.py` 的默认位置参数依赖 `launcher.get_resources_path()`，即在仓库根目录执行时指向 `chatlaw/resources/vectorstore/embedding_model`；如果嵌入模型放在别处，需显式传目录（或在 `develop/RAG/` 下执行时用绝对路径）。
