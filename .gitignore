@@ -4,9 +4,21 @@ video_model/
 resources/
 .idea/
 __pycache__/
+*.pyc
 .openi_home/
 openi_resource.version
 chatlaw.egg-info/
 build/
 _asr_cache/
 *.zip
+
+# 本地编辑器/工具产物
+.zcode/
+.venv/
+
+# 嵌入式 Python 发行版（bootstrap 用，不入库）
+python-3.11.9-embed-amd64/
+
+# develop/RAG 离线建库产物
+develop/RAG/output*/
+develop/RAG/resources/
